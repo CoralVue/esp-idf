@@ -112,6 +112,7 @@ typedef struct {
 typedef struct {
     uint8_t ssid[33];                     /**< SSID of AP */
     int8_t  rssi;                         /**< signal strength of AP */
+    int8_t channel;                       // ADDED BY DON EDVALSON FOR HYDROS
 } esp_blufi_ap_record_t;
 
 /**

@@ -118,7 +118,8 @@ esp_err_t pcnt_set_pin(pcnt_unit_t unit, pcnt_channel_t channel, int pulse_io, i
 
     if(pulse_io >= 0) {
         PIN_FUNC_SELECT(GPIO_PIN_MUX_REG[pulse_io], PIN_FUNC_GPIO);
-        gpio_set_direction(pulse_io, GPIO_MODE_INPUT);
+        PIN_INPUT_ENABLE(GPIO_PIN_MUX_REG[pulse_io]); // ADDED BY DON EDVALSON
+//        gpio_set_direction(pulse_io, GPIO_MODE_INPUT); // COMMENT BY DON EDVALSON
         gpio_set_pull_mode(pulse_io, GPIO_PULLUP_ONLY);
         gpio_matrix_in(pulse_io, input_sig_index, 0);
     }

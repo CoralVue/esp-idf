@@ -624,13 +624,14 @@ void btc_blufi_send_wifi_list(uint16_t apCount, esp_blufi_ap_record_t *list)
         uint len = strlen((const char *)list[i].ssid);
         data_len = (p - data);
         //current_len + ssid + rssi + total_len_value
-        if((data_len + len + 1 + 1) >  malloc_size) {
+        if ((data_len + len + 1 + 1 + 1) > malloc_size) { // DON EDVALSON add an extra 1 for channel
             BTC_TRACE_ERROR("%s len error", __func__);
             osi_free(data);
             return;
         }
-        *p++ = len + 1; // length of ssid + rssi
+        *p++ = len + 2; // length of ssid + rssi // DON EDVALSON make this +2 for channel
         *p++ = list[i].rssi;
+        *p++ = list[i].channel; // DON EDVALSON add channel
         memcpy(p, list[i].ssid, len);
         p = p + len;
     }
