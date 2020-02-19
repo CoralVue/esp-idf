@@ -1,48 +1,58 @@
+idf_build_get_property(target IDF_TARGET)
+
+idf_component_register(INCLUDE_DIRS include)
+
 if(BOOTLOADER_BUILD)
-    # For bootloader, all we need is headers
-    set(COMPONENT_ADD_INCLUDEDIRS "include")
-    set(COMPONENT_REQUIRES ${IDF_COMPONENTS})
-    set(COMPONENT_SRCS)
-    register_component()
     set(scripts
-        "esp32/ld/esp32.rom.ld"
-        "esp32/ld/esp32.rom.newlib-funcs.ld"
-        "esp32/ld/esp32.rom.libgcc.ld"
+        "${target}/ld/${target}.rom.ld"
+        "${target}/ld/${target}.rom.newlib-funcs.ld"
+        "${target}/ld/${target}.rom.libgcc.ld"
         )
-    target_linker_script(${COMPONENT_LIB} "${scripts}")
-else()
-    # Regular app build
-    set(COMPONENT_SRCS "esp_rom.c")
-    set(COMPONENT_ADD_INCLUDEDIRS "include")
+    if(target STREQUAL "esp32s2")
+        list(APPEND scripts "esp32s2/ld/esp32s2.rom.spiflash.ld")
+    endif()
 
-    register_component()
-
+    target_linker_script(${COMPONENT_LIB} INTERFACE "${scripts}")
+else() # Regular app build
     set(scripts
-        "esp32/ld/esp32.rom.ld"
-        "esp32/ld/esp32.rom.libgcc.ld"
-        "esp32/ld/esp32.rom.syscalls.ld"
-        "esp32/ld/esp32.rom.newlib-data.ld"
-        )
-    target_linker_script(${COMPONENT_LIB} "${scripts}")
+        "${target}/ld/${target}.rom.ld"
+        "${target}/ld/${target}.rom.libgcc.ld"
+        "${target}/ld/${target}.rom.newlib-data.ld")
 
-    if(CONFIG_SPIRAM_CACHE_WORKAROUND)
-        # Note: Adding as a PUBLIC compile option here causes this option to propagate to all components that depend on esp32.
-        #
-        # To handle some corner cases, the same flag is set in project_include.cmake
-        target_compile_options(${COMPONENT_LIB} PUBLIC -mfix-esp32-psram-cache-issue)
-    else()
-        target_linker_script(${COMPONENT_LIB} "esp32/ld/esp32.rom.newlib-funcs.ld")
+    if(target STREQUAL "esp32")
+        list(APPEND scripts "${target}/ld/${target}.rom.syscalls.ld")
+
+        if(NOT CONFIG_SPIRAM_CACHE_WORKAROUND)
+            list(APPEND scripts "esp32/ld/esp32.rom.newlib-funcs.ld")
+            if(NOT CONFIG_SDK_TOOLCHAIN_SUPPORTS_TIME_WIDE_64_BITS)
+                # If SDK_TOOLCHAIN_SUPPORTS_TIME_WIDE_64_BITS option is defined
+                # then all time functions from the ROM memory will not be linked.
+                # Instead, those functions can be used from the toolchain by ESP-IDF.
+                target_linker_script(${COMPONENT_LIB} INTERFACE "esp32/ld/esp32.rom.newlib-funcs-time.ld")
+            endif()
+
+            # Include in newlib nano from ROM only if SPIRAM cache workaround is disabled
+            if(CONFIG_NEWLIB_NANO_FORMAT)
+                list(APPEND scripts "esp32/ld/esp32.rom.newlib-nano.ld")
+            endif()
+
+        endif()
+
+        if(NOT CONFIG_SPI_FLASH_ROM_DRIVER_PATCH)
+            list(APPEND scripts "esp32/ld/esp32.rom.spiflash.ld")
+        endif()
+
+    elseif(target STREQUAL "esp32s2")
+        # no SPIRAM workaround for esp32s2
+
+        list(APPEND scripts "esp32s2/ld/esp32s2.rom.newlib-funcs.ld"
+                            "esp32s2/ld/esp32s2.rom.spiflash.ld")
+
+        if(CONFIG_NEWLIB_NANO_FORMAT)
+            list(APPEND scripts "esp32s2/ld/esp32s2.rom.newlib-nano.ld")
+        endif()
     endif()
 
-    if(CONFIG_NEWLIB_NANO_FORMAT)
-        target_linker_script(${COMPONENT_LIB} "esp32/ld/esp32.rom.newlib-nano.ld")
-    endif()
+    target_linker_script(${COMPONENT_LIB} INTERFACE "${scripts}")
 
-    if(NOT GCC_NOT_5_2_0)
-        target_linker_script(${COMPONENT_LIB} "esp32/ld/esp32.rom.newlib-locale.ld")
-    endif()
-
-    if(NOT CONFIG_SPI_FLASH_ROM_DRIVER_PATCH)
-        target_linker_script(${COMPONENT_LIB} "esp32/ld/esp32.rom.spiflash.ld")
-    endif()
 endif()

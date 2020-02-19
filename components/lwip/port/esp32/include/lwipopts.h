@@ -231,7 +231,7 @@
 
 #define LWIP_DHCP_IP_ADDR_RESTORE()     dhcp_ip_addr_restore(netif)
 #define LWIP_DHCP_IP_ADDR_STORE()       dhcp_ip_addr_store(netif)
-#define LWIP_DHCP_IP_ADDR_ERASE()       dhcp_ip_addr_erase(esp_netif[tcpip_if])
+#define LWIP_DHCP_IP_ADDR_ERASE(esp_netif)       dhcp_ip_addr_erase(esp_netif)
 
 #endif
 
@@ -312,6 +312,11 @@
 #define TCP_QUEUE_OOSEQ                 CONFIG_LWIP_TCP_QUEUE_OOSEQ
 
 /**
+ * LWIP_TCP_SACK_OUT==1: TCP will support sending selective acknowledgements (SACKs).
+ */
+#define LWIP_TCP_SACK_OUT               CONFIG_LWIP_TCP_SACK_OUT
+
+/**
  * ESP_TCP_KEEP_CONNECTION_WHEN_IP_CHANGES==1: Keep TCP connection when IP changed
  * scenario happens: 192.168.0.2 -> 0.0.0.0 -> 192.168.0.2 or 192.168.0.2 -> 0.0.0.0
  */
@@ -324,6 +329,11 @@
  *         for the event. This is the default.
 */
 #define TCP_MSS                         CONFIG_LWIP_TCP_MSS
+
+/**
+ * TCP_TMR_INTERVAL: TCP timer interval
+ */
+#define TCP_TMR_INTERVAL                CONFIG_LWIP_TCP_TMR_INTERVAL
 
 /**
  * TCP_MSL: The maximum segment lifetime in milliseconds
@@ -361,6 +371,19 @@
 #endif
 #ifndef TCP_OVERSIZE
 #error "One of CONFIG_TCP_OVERSIZE_xxx options should be set by sdkconfig"
+#endif
+
+/**
+ * LWIP_WND_SCALE and TCP_RCV_SCALE:
+ * Set LWIP_WND_SCALE to 1 to enable window scaling.
+ * Set TCP_RCV_SCALE to the desired scaling factor (shift count in the
+ * range of [0..14]).
+ * When LWIP_WND_SCALE is enabled but TCP_RCV_SCALE is 0, we can use a large
+ * send window while having a small receive window only.
+ */
+#ifdef CONFIG_LWIP_WND_SCALE
+#define LWIP_WND_SCALE                  1
+#define TCP_RCV_SCALE                   CONFIG_LWIP_TCP_RCV_SCALE
 #endif
 
 /*
@@ -536,12 +559,24 @@
  */
 #define SO_REUSE                        CONFIG_LWIP_SO_REUSE
 
+
+/**
+ * LWIP_DNS_SUPPORT_MDNS_QUERIES==1: Enable mDNS queries in hostname resolution.
+ * This option is set via menuconfig.
+ */
+#define LWIP_DNS_SUPPORT_MDNS_QUERIES   CONFIG_LWIP_DNS_SUPPORT_MDNS_QUERIES
 /**
  * SO_REUSE_RXTOALL==1: Pass a copy of incoming broadcast/multicast packets
  * to all local matches if SO_REUSEADDR is turned on.
  * WARNING: Adds a memcpy for every packet if passing to more than one pcb!
  */
 #define SO_REUSE_RXTOALL                CONFIG_LWIP_SO_REUSE_RXTOALL
+
+/**
+ * LWIP_NETBUF_RECVINFO==1: Enable IP_PKTINFO option.
+ * This option is set via menuconfig.
+ */
+#define LWIP_NETBUF_RECVINFO            CONFIG_LWIP_NETBUF_RECVINFO
 
 /*
    ----------------------------------------
@@ -753,56 +788,36 @@
 #define ESP_STATS_MEM                   CONFIG_LWIP_STATS
 #define ESP_STATS_DROP                  CONFIG_LWIP_STATS
 #define ESP_STATS_TCP                   0
-#define ESP_DHCP_TIMER                  1
 #define ESP_DHCPS_TIMER                 1
 #define ESP_LWIP_LOGI(...)              ESP_LOGI("lwip", __VA_ARGS__)
 #define ESP_PING                        1
 #define ESP_HAS_SELECT                  1
 #define ESP_AUTO_RECV                   1
 #define ESP_GRATUITOUS_ARP              CONFIG_LWIP_ESP_GRATUITOUS_ARP
+#define ESP_IP4_ROUTE                   1
+#define ESP_AUTO_IP                     1
+#define ESP_PBUF                        1
+#define ESP_PPP                         1
+#define ESP_IPV6                        1
+#define ESP_SOCKET                      1
+#define ESP_LWIP_SELECT                 1
+#define ESP_LWIP_LOCK                   1
 
 #ifdef ESP_IRAM_ATTR
 #undef ESP_IRAM_ATTR
 #endif
 #define ESP_IRAM_ATTR
 
-#if ESP_PERF
-#define DBG_PERF_PATH_SET(dir, point)
-#define DBG_PERF_FILTER_LEN             1000
-
-enum {
-  DBG_PERF_DIR_RX = 0,
-  DBG_PERF_DIR_TX,
-};
-
-enum {
-  DBG_PERF_POINT_INT       = 0,
-  DBG_PERF_POINT_WIFI_IN   = 1,
-  DBG_PERF_POINT_WIFI_OUT  = 2,
-  DBG_PERF_POINT_LWIP_IN   = 3,
-  DBG_PERF_POINT_LWIP_OUT  = 4,
-  DBG_PERF_POINT_SOC_IN    = 5,
-  DBG_PERF_POINT_SOC_OUT   = 6,
-};
-
+#ifdef CONFIG_LWIP_TIMERS_ONDEMAND
+#define ESP_LWIP_IGMP_TIMERS_ONDEMAND            1
+#define ESP_LWIP_MLD6_TIMERS_ONDEMAND            1
 #else
-#define DBG_PERF_PATH_SET(dir, point)
-#define DBG_PERF_FILTER_LEN             1000
+#define ESP_LWIP_IGMP_TIMERS_ONDEMAND            0
+#define ESP_LWIP_MLD6_TIMERS_ONDEMAND            0
 #endif
 
 #define TCP_SND_BUF                     CONFIG_LWIP_TCP_SND_BUF_DEFAULT
 #define TCP_WND                         CONFIG_LWIP_TCP_WND_DEFAULT
-
-#if ESP_PER_SOC_TCP_WND
-#define TCP_WND_DEFAULT                 CONFIG_LWIP_TCP_WND_DEFAULT
-#define TCP_SND_BUF_DEFAULT             CONFIG_LWIP_TCP_SND_BUF_DEFAULT
-#define TCP_WND(pcb)                    (pcb->per_soc_tcp_wnd)
-#define TCP_SND_BUF(pcb)                (pcb->per_soc_tcp_snd_buf)
-#define TCP_SND_QUEUELEN(pcb)           ((4 * (TCP_SND_BUF((pcb))) + (TCP_MSS - 1))/(TCP_MSS))
-#define TCP_SNDLOWAT(pcb)               LWIP_MIN(LWIP_MAX(((TCP_SND_BUF((pcb)))/2), (2 * TCP_MSS) + 1), (TCP_SND_BUF((pcb))) - 1)
-#define TCP_SNDQUEUELOWAT(pcb)          LWIP_MAX(((TCP_SND_QUEUELEN((pcb)))/2), 5)
-#define TCP_WND_UPDATE_THRESHOLD(pcb)   LWIP_MIN((TCP_WND((pcb)) / 4), (TCP_MSS * 4))
-#endif
 
 /**
  * DHCP_DEBUG: Enable debugging in dhcp.c.
@@ -819,6 +834,25 @@ enum {
 
 #define LWIP_DHCP_MAX_NTP_SERVERS       CONFIG_LWIP_DHCP_MAX_NTP_SERVERS
 #define LWIP_TIMEVAL_PRIVATE            0
+
+/*
+   --------------------------------------
+   ------------ SNTP options ------------
+   --------------------------------------
+*/
+/*
+ * SNTP update delay - in milliseconds
+ */
+/** Set this to 1 to support DNS names (or IP address strings) to set sntp servers
+ * One server address/name can be defined as default if SNTP_SERVER_DNS == 1:
+ * \#define SNTP_SERVER_ADDRESS "pool.ntp.org"
+ */
+#define SNTP_SERVER_DNS            1
+
+// It disables a check of SNTP_UPDATE_DELAY it is done in sntp_set_sync_interval
+#define SNTP_SUPPRESS_DELAY_CHECK
+
+#define SNTP_UPDATE_DELAY              (sntp_get_sync_interval())
 
 #define SNTP_SET_SYSTEM_TIME_US(sec, us)  \
     do { \

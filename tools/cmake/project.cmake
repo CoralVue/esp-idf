@@ -18,6 +18,17 @@ if(PYTHON_DEPS_CHECKED)
     idf_build_set_property(__CHECK_PYTHON 0)
 endif()
 
+# Store CMake arguments that need to be passed into all CMake sub-projects as well
+# (bootloader, ULP, etc)
+#
+# It's not possible to tell if CMake was called with --warn-uninitialized, so to also
+# have these warnings in sub-projects we set a cache variable as well and then check that.
+if(WARN_UNINITIALIZED)
+    idf_build_set_property(EXTRA_CMAKE_ARGS --warn-uninitialized)
+else()
+    idf_build_set_property(EXTRA_CMAKE_ARGS "")
+endif()
+
 # Initialize build target for this build using the environment variable or
 # value passed externally.
 __target_init()
@@ -38,13 +49,12 @@ function(__project_get_revision var)
             if(PROJECT_VER_GIT)
                 set(PROJECT_VER ${PROJECT_VER_GIT})
             else()
-                message(STATUS "Project is not inside a git repository, \
-                        will not use 'git describe' to determine PROJECT_VER.")
-                set(PROJECT_VER "1")
+                message(STATUS "Project is not inside a git repository, or git repository has no commits;"
+                        " will not use 'git describe' to determine PROJECT_VER.")
+                set(PROJECT_VER 1)
             endif()
         endif()
     endif()
-    message(STATUS "Project version: ${PROJECT_VER}")
     set(${var} "${PROJECT_VER}" PARENT_SCOPE)
 endfunction()
 
@@ -158,6 +168,8 @@ function(__project_init components_var test_components_var)
         endif()
     endfunction()
 
+    idf_build_set_property(IDF_COMPONENT_MANAGER "$ENV{IDF_COMPONENT_MANAGER}")
+
     # Add component directories to the build, given the component filters, exclusions
     # extra directories, etc. passed from the root CMakeLists.txt.
     if(COMPONENT_DIRS)
@@ -168,6 +180,43 @@ function(__project_init components_var test_components_var)
             __project_component_dir(${component_dir})
         endforeach()
     else()
+        # Add project manifest and lock file to the list of dependencies
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/idf_project.yml")
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/dependencies.lock")
+
+        idf_build_get_property(idf_component_manager IDF_COMPONENT_MANAGER)
+        if(idf_component_manager)
+            if(idf_component_manager EQUAL "0")
+                message(VERBOSE "IDF Component manager was explicitly disabled by setting IDF_COMPONENT_MANAGER=0")
+            elseif(idf_component_manager EQUAL "1")
+                set(managed_components_list_file ${CMAKE_BINARY_DIR}/managed_components_list.temp.cmake)
+
+                # Call for package manager to prepare remote dependencies
+                execute_process(COMMAND ${PYTHON}
+                    "-m"
+                    "idf_component_manager.prepare_components"
+                    "--project_dir=${CMAKE_CURRENT_LIST_DIR}"
+                    "prepare_dependencies"
+                    "--managed_components_list_file=${managed_components_list_file}"
+                    RESULT_VARIABLE result
+                    ERROR_VARIABLE error)
+
+                if(NOT result EQUAL 0)
+                    message(FATAL_ERROR "${error}")
+                endif()
+
+                # Include managed components
+                include(${managed_components_list_file})
+                file(REMOVE ${managed_components_list_file})
+            else()
+                message(WARNING "IDF_COMPONENT_MANAGER environment variable is set to unknown value "
+                        "\"${idf_component_manager}\". If you want to use component manager set it to 1.")
+            endif()
+        elseif(EXISTS "${CMAKE_CURRENT_LIST_DIR}/idf_project.yml")
+            message(WARNING "\"idf_project.yml\" file is found in project directory, "
+                    "but component manager is not enabled. Please set IDF_COMPONENT_MANAGER environment variable.")
+        endif()
+
         # Look for components in the usual places: CMAKE_CURRENT_LIST_DIR/main,
         # CMAKE_CURRENT_LIST_DIR/components, and the extra component dirs
         if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/main")
@@ -244,12 +293,13 @@ macro(project project_name)
 
     __target_set_toolchain()
 
-    # Enable ccache if it's on the path
-    if(NOT CCACHE_DISABLE)
+    if(CCACHE_ENABLE)
         find_program(CCACHE_FOUND ccache)
         if(CCACHE_FOUND)
-            message(STATUS "ccache will be used for faster builds")
+            message(STATUS "ccache will be used for faster recompilation")
             set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE ccache)
+        else()
+            message(WARNING "enabled ccache in build but ccache program not found")
         endif()
     endif()
 
@@ -264,6 +314,31 @@ macro(project project_name)
     function(project)
         set(project_ARGV ARGV)
         __project(${${project_ARGV}})
+
+        # Set the variables that project() normally sets, documented in the
+        # command's docs.
+        #
+        # https://cmake.org/cmake/help/v3.5/command/project.html
+        #
+        # There is some nuance when it comes to setting version variables in terms of whether
+        # CMP0048 is set to OLD or NEW. However, the proper behavior should have bee already handled by the original
+        # project call, and we're just echoing the values those variables were set to.
+        set(PROJECT_NAME "${PROJECT_NAME}" PARENT_SCOPE)
+        set(PROJECT_BINARY_DIR "${PROJECT_BINARY_DIR}" PARENT_SCOPE)
+        set(PROJECT_SOURCE_DIR "${PROJECT_SOURCE_DIR}" PARENT_SCOPE)
+        set(PROJECT_VERSION "${PROJECT_VERSION}" PARENT_SCOPE)
+        set(PROJECT_VERSION_MAJOR "${PROJECT_VERSION_MAJOR}" PARENT_SCOPE)
+        set(PROJECT_VERSION_MINOR "${PROJECT_VERSION_MINOR}" PARENT_SCOPE)
+        set(PROJECT_VERSION_PATCH "${PROJECT_VERSION_PATCH}" PARENT_SCOPE)
+        set(PROJECT_VERSION_TWEAK "${PROJECT_VERSION_TWEAK}" PARENT_SCOPE)
+
+        set(${PROJECT_NAME}_BINARY_DIR "${${PROJECT_NAME}_BINARY_DIR}" PARENT_SCOPE)
+        set(${PROJECT_NAME}_SOURCE_DIR "${${PROJECT_NAME}_SOURCE_DIR}" PARENT_SCOPE)
+        set(${PROJECT_NAME}_VERSION "${${PROJECT_NAME}_VERSION}" PARENT_SCOPE)
+        set(${PROJECT_NAME}_VERSION_MAJOR "${${PROJECT_NAME}_VERSION_MAJOR}" PARENT_SCOPE)
+        set(${PROJECT_NAME}_VERSION_MINOR "${${PROJECT_NAME}_VERSION_MINOR}" PARENT_SCOPE)
+        set(${PROJECT_NAME}_VERSION_PATCH "${${PROJECT_NAME}_VERSION_PATCH}" PARENT_SCOPE)
+        set(${PROJECT_NAME}_VERSION_TWEAK "${${PROJECT_NAME}_VERSION_TWEAK}" PARENT_SCOPE)
     endfunction()
 
     # Prepare the following arguments for the idf_build_process() call using external
@@ -276,25 +351,30 @@ macro(project project_name)
     # PROJECT_NAME is taken from the passed name from project() call
     # PROJECT_DIR is set to the current directory
     # PROJECT_VER is from the version text or git revision of the current repo
-    if(SDKCONFIG_DEFAULTS)
-        get_filename_component(sdkconfig_defaults "${SDKCONFIG_DEFAULTS}" ABSOLUTE)
-        if(NOT EXISTS "${sdkconfig_defaults}")
-            message(FATAL_ERROR "SDKCONFIG_DEFAULTS '${sdkconfig_defaults}' does not exist.")
-        endif()
-    else()
+    set(_sdkconfig_defaults "$ENV{SDKCONFIG_DEFAULTS}")
+
+    if(NOT _sdkconfig_defaults)
         if(EXISTS "${CMAKE_SOURCE_DIR}/sdkconfig.defaults")
-            set(sdkconfig_defaults "${CMAKE_SOURCE_DIR}/sdkconfig.defaults")
+            set(_sdkconfig_defaults "${CMAKE_SOURCE_DIR}/sdkconfig.defaults")
         else()
-            set(sdkconfig_defaults "")
+            set(_sdkconfig_defaults "")
         endif()
     endif()
 
+    if(SDKCONFIG_DEFAULTS)
+        set(_sdkconfig_defaults "${SDKCONFIG_DEFAULTS}")
+    endif()
+
+    foreach(sdkconfig_default ${_sdkconfig_defaults})
+        get_filename_component(sdkconfig_default "${sdkconfig_default}" ABSOLUTE)
+        if(NOT EXISTS "${sdkconfig_default}")
+            message(FATAL_ERROR "SDKCONFIG_DEFAULTS '${sdkconfig_default}' does not exist.")
+        endif()
+        list(APPEND sdkconfig_defaults ${sdkconfig_default})
+    endforeach()
+
     if(SDKCONFIG)
         get_filename_component(sdkconfig "${SDKCONFIG}" ABSOLUTE)
-        if(NOT EXISTS "${sdkconfig}")
-            message(FATAL_ERROR "SDKCONFIG '${sdkconfig}' does not exist.")
-        endif()
-        set(sdkconfig ${SDKCONFIG})
     else()
         set(sdkconfig "${CMAKE_CURRENT_LIST_DIR}/sdkconfig")
     endif()
@@ -327,13 +407,16 @@ macro(project project_name)
     # so that it treats components equally.
     #
     # This behavior should only be when user did not set REQUIRES/PRIV_REQUIRES manually.
-    idf_build_get_property(build_components BUILD_COMPONENTS)
+    idf_build_get_property(build_components BUILD_COMPONENT_ALIASES)
     if(idf::main IN_LIST build_components)
         __component_get_target(main_target idf::main)
         __component_get_property(reqs ${main_target} REQUIRES)
         __component_get_property(priv_reqs ${main_target} PRIV_REQUIRES)
         idf_build_get_property(common_reqs __COMPONENT_REQUIRES_COMMON)
         if(reqs STREQUAL common_reqs AND NOT priv_reqs) #if user has not set any requirements
+            if(test_components)
+                list(REMOVE_ITEM build_components ${test_components})
+            endif()
             list(REMOVE_ITEM build_components idf::main)
             __component_get_property(lib ${main_target} COMPONENT_LIB)
             set_property(TARGET ${lib} APPEND PROPERTY INTERFACE_LINK_LIBRARIES "${build_components}")
@@ -356,8 +439,6 @@ macro(project project_name)
     add_executable(${project_elf} "${project_elf_src}")
     add_dependencies(${project_elf} _project_elf_src)
 
-    target_link_libraries(${project_elf} "-Wl,--start-group")
-
     if(test_components)
         target_link_libraries(${project_elf} "-Wl,--whole-archive")
         foreach(test_component ${test_components})
@@ -368,7 +449,7 @@ macro(project project_name)
         target_link_libraries(${project_elf} "-Wl,--no-whole-archive")
     endif()
 
-    idf_build_get_property(build_components BUILD_COMPONENTS)
+    idf_build_get_property(build_components BUILD_COMPONENT_ALIASES)
     if(test_components)
         list(REMOVE_ITEM build_components ${test_components})
     endif()
@@ -384,19 +465,26 @@ macro(project project_name)
     idf_build_get_property(idf_path IDF_PATH)
     idf_build_get_property(python PYTHON)
 
+    set(idf_size ${python} ${idf_path}/tools/idf_size.py)
+    if(DEFINED OUTPUT_JSON AND OUTPUT_JSON)
+        list(APPEND idf_size "--json")
+    endif()
+
     # Add size targets, depend on map file, run idf_size.py
     add_custom_target(size
         DEPENDS ${project_elf}
-        COMMAND ${python} ${idf_path}/tools/idf_size.py ${mapfile}
+        COMMAND ${idf_size} ${mapfile}
         )
     add_custom_target(size-files
         DEPENDS ${project_elf}
-        COMMAND ${python} ${idf_path}/tools/idf_size.py --files ${mapfile}
+        COMMAND ${idf_size} --files ${mapfile}
         )
     add_custom_target(size-components
         DEPENDS ${project_elf}
-        COMMAND ${python} ${idf_path}/tools/idf_size.py --archives ${mapfile}
+        COMMAND ${idf_size} --archives ${mapfile}
         )
+
+    unset(idf_size)
 
     idf_build_executable(${project_elf})
 

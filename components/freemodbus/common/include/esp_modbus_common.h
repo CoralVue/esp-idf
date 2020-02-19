@@ -24,7 +24,7 @@
 // Default port defines
 #define MB_DEVICE_ADDRESS   (1)             // Default slave device address in Modbus
 #define MB_DEVICE_SPEED     (115200)        // Default Modbus speed for now hard defined
-#define MB_UART_PORT        (UART_NUM_2)    // Default UART port number
+#define MB_UART_PORT        (UART_NUM_MAX - 1)  // Default UART port number
 #define MB_PAR_INFO_TOUT    (10)            // Timeout for get parameter info
 #define MB_PARITY_NONE      (UART_PARITY_DISABLE)
 
@@ -114,7 +114,7 @@ typedef union {
         uart_port_t port;                       /*!< Modbus communication port (UART) number */
         uint32_t baudrate;                      /*!< Modbus baudrate */
         uart_parity_t parity;                   /*!< Modbus UART parity settings */
-        uint16_t dummy_port;
+        uint16_t dummy_port;                    /*!< Dummy field, unused */
     };
     // Tcp communication structure
     struct {

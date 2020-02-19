@@ -27,9 +27,9 @@
 #include <esp_log.h>
 #include <esp32/rom/spi_flash.h>
 #include "../cache_utils.h"
-#include "soc/timer_group_struct.h"
-#include "soc/timer_group_reg.h"
+#include "soc/timer_periph.h"
 
+#if !TEMPORARY_DISABLED_FOR_TARGETS(ESP32S2)
 static const uint8_t large_const_buffer[16400] = {
     203, // first byte
     1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,
@@ -43,13 +43,13 @@ static const uint8_t large_const_buffer[16400] = {
 
 static void test_write_large_buffer(const uint8_t *source, size_t length);
 
-TEST_CASE("Test spi_flash_write large const buffer", "[spi_flash]")
+TEST_CASE("Test spi_flash_write large const buffer", "[spi_flash][esp_flash]")
 {
     // buffer in flash
     test_write_large_buffer(large_const_buffer, sizeof(large_const_buffer));
 }
 
-TEST_CASE("Test spi_flash_write large RAM buffer", "[spi_flash]")
+TEST_CASE("Test spi_flash_write large RAM buffer", "[spi_flash][esp_flash]")
 {
     // buffer in RAM
     uint8_t *source_buf = malloc(sizeof(large_const_buffer));
@@ -94,3 +94,4 @@ static void test_write_large_buffer(const uint8_t *source, size_t length)
     TEST_ASSERT_EQUAL_HEX8(0xFF, ends[2]);
     TEST_ASSERT_EQUAL_HEX8(0xFF, ends[3]);
 }
+#endif //!TEMPORARY_DISABLED_FOR_TARGETS(ESP32S2)

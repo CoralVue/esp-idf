@@ -1,7 +1,9 @@
-Smart Config
-============
+SmartConfig
+===========
+
+:link_to_translation:`zh_CN:[中文]`
 
 API Reference
 -------------
 
-.. include:: /_build/inc/esp_smartconfig.inc
+.. include-build-file:: inc/esp_smartconfig.inc

@@ -103,7 +103,7 @@ typedef enum{
  *
  * @return pointer to PHY init data structure
  */
-const esp_phy_init_data_t* esp_phy_get_init_data();
+const esp_phy_init_data_t* esp_phy_get_init_data(void);
 
 /**
  * @brief Release PHY init data
@@ -201,6 +201,18 @@ esp_err_t esp_phy_rf_deinit(phy_rf_module_t module);
  * @brief Load calibration data from NVS and initialize PHY and RF module
  */
 void esp_phy_load_cal_and_init(phy_rf_module_t module);
+
+/**
+ * @brief Enable WiFi/BT common clock
+ *
+ */
+void esp_phy_common_clock_enable(void);
+
+/**
+ * @brief Disable WiFi/BT common clock
+ *
+ */
+void esp_phy_common_clock_disable(void);
 
 /**
  * @brief Module requires to enter modem sleep

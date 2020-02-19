@@ -1,10 +1,6 @@
-# Set usual component variables
-set(COMPONENT_SRCS "ulp_example_main.c")
-set(COMPONENT_ADD_INCLUDEDIRS "")
-set(COMPONENT_REQUIRES soc nvs_flash ulp)
-
-register_component()
-
+idf_component_register(SRCS "ulp_example_main.c"
+                    INCLUDE_DIRS ""
+                    REQUIRES soc nvs_flash ulp)
 #
 # ULP support additions to component CMakeLists.txt.
 #
@@ -22,4 +18,4 @@ set(ulp_exp_dep_srcs "ulp_example_main.c")
 #
 # 4. Call function to build ULP binary and embed in project using the argument
 #    values above.
-ulp_embed_binary(${ulp_app_name} ${ulp_s_sources} ${ulp_exp_dep_srcs})
+ulp_embed_binary(${ulp_app_name} "${ulp_s_sources}" "${ulp_exp_dep_srcs}")

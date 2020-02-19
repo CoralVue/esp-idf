@@ -35,8 +35,7 @@
 
 #include "esp32/sha.h"
 #include "esp32/rom/ets_sys.h"
-#include "soc/dport_reg.h"
-#include "soc/hwcrypto_reg.h"
+#include "soc/hwcrypto_periph.h"
 #include "driver/periph_ctrl.h"
 
 inline static uint32_t SHA_LOAD_REG(esp_sha_type sha_type) {
@@ -196,7 +195,7 @@ static bool esp_sha_lock_engine_common(esp_sha_type sha_type, TickType_t ticks_t
 
 void esp_sha_unlock_engine(esp_sha_type sha_type)
 {
-    SemaphoreHandle_t *engine_state = sha_get_engine_state(sha_type);
+    SemaphoreHandle_t engine_state = sha_get_engine_state(sha_type);
 
     portENTER_CRITICAL(&engines_in_use_lock);
 
@@ -229,9 +228,10 @@ void esp_sha_read_digest_state(esp_sha_type sha_type, void *digest_state)
 {
     uint32_t *digest_state_words = NULL;
     uint32_t *reg_addr_buf = NULL;
+    uint32_t word_len = sha_length(sha_type)/4;
 #ifndef NDEBUG
     {
-        SemaphoreHandle_t *engine_state = sha_get_engine_state(sha_type);
+        SemaphoreHandle_t engine_state = sha_get_engine_state(sha_type);
         assert(uxSemaphoreGetCount(engine_state) == 0 &&
                "SHA engine should be locked" );
     }
@@ -251,15 +251,25 @@ void esp_sha_read_digest_state(esp_sha_type sha_type, void *digest_state)
     if(sha_type == SHA2_384 || sha_type == SHA2_512) {
         /* for these ciphers using 64-bit states, swap each pair of words */
         DPORT_INTERRUPT_DISABLE(); // Disable interrupt only on current CPU.
-        for(int i = 0; i < sha_length(sha_type)/4; i += 2) {
+        for(int i = 0; i < word_len; i += 2) {
             digest_state_words[i+1] = DPORT_SEQUENCE_REG_READ((uint32_t)&reg_addr_buf[i]);
             digest_state_words[i]   = DPORT_SEQUENCE_REG_READ((uint32_t)&reg_addr_buf[i+1]);
         }
         DPORT_INTERRUPT_RESTORE(); // restore the previous interrupt level
     } else {
-        esp_dport_access_read_buffer(digest_state_words, (uint32_t)&reg_addr_buf[0], sha_length(sha_type)/4);
+        esp_dport_access_read_buffer(digest_state_words, (uint32_t)&reg_addr_buf[0], word_len);
     }
     esp_sha_unlock_memory_block();
+
+    /* Fault injection check: verify SHA engine actually ran,
+       state is not all zeroes.
+    */
+    for (int i = 0; i < word_len; i++) {
+        if (digest_state_words[i] != 0) {
+            return;
+        }
+    }
+    abort(); // SHA peripheral returned all zero state, probably due to fault injection
 }
 
 void esp_sha_block(esp_sha_type sha_type, const void *data_block, bool is_first_block)
@@ -268,7 +278,7 @@ void esp_sha_block(esp_sha_type sha_type, const void *data_block, bool is_first_
     uint32_t *data_words = NULL;
 #ifndef NDEBUG
     {
-        SemaphoreHandle_t *engine_state = sha_get_engine_state(sha_type);
+        SemaphoreHandle_t engine_state = sha_get_engine_state(sha_type);
         assert(uxSemaphoreGetCount(engine_state) == 0 &&
                "SHA engine should be locked" );
     }

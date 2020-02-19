@@ -15,14 +15,14 @@
 #pragma once
 
 #include "esp_err.h"
-#include <freertos/FreeRTOSConfig.h>
+#include "freertos/FreeRTOSConfig.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 #ifndef PTHREAD_STACK_MIN
-#define PTHREAD_STACK_MIN    CONFIG_ESP32_PTHREAD_STACK_MIN
+#define PTHREAD_STACK_MIN    CONFIG_PTHREAD_STACK_MIN
 #endif
 
 /** pthread configuration structure that influences pthread creation */
@@ -41,7 +41,7 @@ typedef struct {
  * @return
  *      A default configuration structure.
  */
-esp_pthread_cfg_t esp_pthread_get_default_config();
+esp_pthread_cfg_t esp_pthread_get_default_config(void);
 
 /**
  * @brief Configure parameters for creating pthread

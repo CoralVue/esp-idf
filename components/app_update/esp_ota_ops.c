@@ -34,7 +34,6 @@
 #include "esp_ota_ops.h"
 #include "sys/queue.h"
 #include "esp32/rom/crc.h"
-#include "soc/dport_reg.h"
 #include "esp_log.h"
 #include "esp_flash_partitions.h"
 #include "bootloader_common.h"
@@ -43,7 +42,7 @@
 #include "esp_efuse.h"
 
 
-#define SUB_TYPE_ID(i) (i & 0x0F) 
+#define SUB_TYPE_ID(i) (i & 0x0F)
 
 typedef struct ota_ops_entry_ {
     uint32_t handle;
@@ -201,7 +200,7 @@ esp_err_t esp_ota_write(esp_ota_handle_t handle, const void *data, size_t size)
             // must erase the partition before writing to it
             assert(it->erased_size > 0 && "must erase the partition before writing to it");
             if (it->wrote_size == 0 && it->partial_bytes == 0 && size > 0 && data_bytes[0] != ESP_IMAGE_HEADER_MAGIC) {
-                ESP_LOGE(TAG, "OTA image has invalid magic byte (expected 0xE9, saw 0x%02x", data_bytes[0]);
+                ESP_LOGE(TAG, "OTA image has invalid magic byte (expected 0xE9, saw 0x%02x)", data_bytes[0]);
                 return ESP_ERR_OTA_VALIDATE_FAILED;
             }
 
@@ -688,12 +687,12 @@ static esp_err_t esp_ota_current_ota_is_workable(bool valid)
     return ESP_OK;
 }
 
-esp_err_t esp_ota_mark_app_valid_cancel_rollback()
+esp_err_t esp_ota_mark_app_valid_cancel_rollback(void)
 {
     return esp_ota_current_ota_is_workable(true);
 }
 
-esp_err_t esp_ota_mark_app_invalid_rollback_and_reboot()
+esp_err_t esp_ota_mark_app_invalid_rollback_and_reboot(void)
 {
     return esp_ota_current_ota_is_workable(false);
 }
@@ -716,7 +715,7 @@ static int get_last_invalid_otadata(const esp_ota_select_entry_t *two_otadata)
     return num_invalid_otadata;
 }
 
-const esp_partition_t* esp_ota_get_last_invalid_partition()
+const esp_partition_t* esp_ota_get_last_invalid_partition(void)
 {
     esp_ota_select_entry_t otadata[2];
     if (read_otadata(otadata) == NULL) {

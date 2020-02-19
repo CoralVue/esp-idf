@@ -13,17 +13,15 @@
 // limitations under the License.
 
 #include <string.h>
+#include "sdkconfig.h"
 #include <hal/spi_ll.h>
 #include <hal/spi_slave_hal.h>
 #include <soc/lldesc.h>
-#include "driver/spi_common.h"
+#include "driver/spi_common_internal.h"
 #include "driver/spi_slave.h"
-#include "soc/dport_reg.h"
 #include "soc/spi_periph.h"
-#include "esp32/rom/ets_sys.h"
 #include "esp_types.h"
 #include "esp_attr.h"
-#include "esp_intr_alloc.h"
 #include "esp_intr_alloc.h"
 #include "esp_log.h"
 #include "esp_err.h"
@@ -32,12 +30,8 @@
 #include "freertos/semphr.h"
 #include "freertos/xtensa_api.h"
 #include "freertos/task.h"
-#include "soc/soc.h"
 #include "soc/soc_memory_layout.h"
-#include "soc/dport_reg.h"
-#include "esp32/rom/lldesc.h"
 #include "driver/gpio.h"
-#include "driver/periph_ctrl.h"
 #include "esp_heap_caps.h"
 
 static const char *SPI_TAG = "spi_slave";
@@ -47,7 +41,7 @@ static const char *SPI_TAG = "spi_slave";
         return (ret_val); \
     }
 
-#define VALID_HOST(x) (x>SPI_HOST && x<=VSPI_HOST)
+#define VALID_HOST(x) (x > SPI1_HOST && x <= SPI3_HOST)
 
 #ifdef CONFIG_SPI_SLAVE_ISR_IN_IRAM
 #define SPI_SLAVE_ISR_ATTR IRAM_ATTR
@@ -77,13 +71,13 @@ typedef struct {
 #endif
 } spi_slave_t;
 
-static spi_slave_t *spihost[3];
+static spi_slave_t *spihost[SOC_SPI_PERIPH_NUM];
 
 static void IRAM_ATTR spi_intr(void *arg);
 
 static inline bool bus_is_iomux(spi_slave_t *host)
 {
-    return host->flags&SPICOMMON_BUSFLAG_NATIVE_PINS;
+    return host->flags&SPICOMMON_BUSFLAG_IOMUX_PINS;
 }
 
 static void freeze_cs(spi_slave_t *host)
@@ -109,7 +103,11 @@ esp_err_t spi_slave_initialize(spi_host_device_t host, const spi_bus_config_t *b
     esp_err_t err;
     //We only support HSPI/VSPI, period.
     SPI_CHECK(VALID_HOST(host), "invalid host", ESP_ERR_INVALID_ARG);
+#if defined(CONFIG_IDF_TARGET_ESP32)
     SPI_CHECK( dma_chan >= 0 && dma_chan <= 2, "invalid dma channel", ESP_ERR_INVALID_ARG );
+#elif defined(CONFIG_IDF_TARGET_ESP32S2)
+    SPI_CHECK( dma_chan == 0 || dma_chan == host, "invalid dma channel", ESP_ERR_INVALID_ARG );
+#endif
     SPI_CHECK((bus_config->intr_flags & (ESP_INTR_FLAG_HIGH|ESP_INTR_FLAG_EDGE|ESP_INTR_FLAG_INTRDISABLED))==0, "intr flag not allowed", ESP_ERR_INVALID_ARG);
 #ifndef CONFIG_SPI_SLAVE_ISR_IN_IRAM
     SPI_CHECK((bus_config->intr_flags & ESP_INTR_FLAG_IRAM)==0, "ESP_INTR_FLAG_IRAM should be disabled when CONFIG_SPI_SLAVE_ISR_IN_IRAM is not set.", ESP_ERR_INVALID_ARG);
@@ -154,7 +152,7 @@ esp_err_t spi_slave_initialize(spi_host_device_t host, const spi_bus_config_t *b
         spihost[host]->max_transfer_sz = dma_desc_ct * SPI_MAX_DMA_LEN;
     } else {
         //We're limited to non-DMA transfers: the SPI work registers can hold 64 bytes at most.
-        spihost[host]->max_transfer_sz = 16 * 4;
+        spihost[host]->max_transfer_sz = SOC_SPI_MAXIMUM_BUFFER_SIZE;
     }
 #ifdef CONFIG_PM_ENABLE
     err = esp_pm_lock_create(ESP_PM_APB_FREQ_MAX, 0, "spi_slave",
@@ -220,7 +218,7 @@ cleanup:
     free(spihost[host]);
     spihost[host] = NULL;
     spicommon_periph_free(host);
-    spicommon_dma_chan_free(dma_chan);
+    if (dma_chan != 0) spicommon_dma_chan_free(dma_chan);
     return ret;
 }
 
@@ -366,12 +364,14 @@ static void SPI_SLAVE_ISR_ATTR spi_intr(void *arg)
         }
     }
 
+    //Disable interrupt before checking to avoid concurrency issue.
+    esp_intr_disable(host->intr);
     //Grab next transaction
     r = xQueueReceiveFromISR(host->trans_queue, &trans, &do_yield);
-    if (!r) {
-        //No packet waiting. Disable interrupt.
-        esp_intr_disable(host->intr);
-    } else {
+    if (r) {
+        //enable the interrupt again if there is packet to send
+        esp_intr_enable(host->intr);
+
         //We have a transaction. Send it.
         host->cur_trans = trans;
 
@@ -396,5 +396,4 @@ static void SPI_SLAVE_ISR_ATTR spi_intr(void *arg)
     }
     if (do_yield) portYIELD_FROM_ISR();
 }
-
 

@@ -8,7 +8,7 @@ All versions of ESP-WROVER-KIT boards have built-in JTAG functionality. Putting 
 Configure Hardware
 ^^^^^^^^^^^^^^^^^^
 
-1.  Enable on-board JTAG functionality by setting JP8 according to :doc:`../../get-started/get-started-wrover-kit`, Section :ref:`get-started-esp-wrover-kit-v4.1-setup-options`. 
+1.  Enable on-board JTAG functionality by setting JP8 according to :doc:`../../hw-reference/esp32/get-started-wrover-kit`, Section :ref:`get-started-esp-wrover-kit-v4.1-setup-options`.
 
 2.  Verify if ESP32 pins used for JTAG communication are not connected to some other h/w that may disturb JTAG operation:
 
@@ -104,7 +104,7 @@ On macOS, using FT2232 for JTAG and serial port at the same time needs some addi
 
 1. Manually unload the FTDI serial port driver before starting OpenOCD, start OpenOCD, then load the serial port driver.
 
-2. Modify FTDI driver configuration so that it doesn't load itself for channel B of FT2232 chip, which is the channel used for JTAG on WROVER KIT. 
+2. Modify FTDI driver configuration so that it doesn't load itself for channel B of FT2232 chip, which is the channel used for JTAG on WROVER KIT.
 
 Manually unloading the driver
 .............................
@@ -121,19 +121,13 @@ Manually unloading the driver
 
     sudo kextunload -b com.apple.driver.AppleUSBFTDI
 
-4. Run OpenOCD (paths are given for downloadable OpenOCD archive)::
+4. Run OpenOCD::
 
-    bin/openocd -s share/openocd/scripts -f interface/ftdi/esp32_devkitj_v1.cfg -f board/esp-wroom-32.cfg
-
-   Or, if OpenOCD was built from source::
-
-    src/openocd -s tcl -f interface/ftdi/esp32_devkitj_v1.cfg -f board/esp-wroom-32.cfg
+    bin/openocd -f board/esp32-wrover-kit-3.3v.cfg
 
 5. In another terminal window, load FTDI serial port driver again::
 
     sudo kextload -b com.FTDI.driver.FTDIUSBSerialDriver
-
-.. include:: ./windows-openocd-note.rst
 
 .. note::
 

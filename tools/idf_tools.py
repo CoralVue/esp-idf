@@ -53,12 +53,24 @@ import zipfile
 import errno
 import shutil
 import functools
+import copy
 from collections import OrderedDict, namedtuple
+
+try:
+    import typing  # noqa: F401
+except ImportError:
+    pass
 
 try:
     from urllib.request import urlretrieve
 except ImportError:
     from urllib import urlretrieve
+
+try:
+    from exceptions import WindowsError
+except ImportError:
+    class WindowsError(OSError):
+        pass
 
 
 TOOLS_FILE = 'tools/tools.json'
@@ -96,6 +108,7 @@ PLATFORM_FROM_NAME = {
     # Windows
     PLATFORM_WIN32: PLATFORM_WIN32,
     'Windows-i686': PLATFORM_WIN32,
+    'Windows-x86': PLATFORM_WIN32,
     PLATFORM_WIN64: PLATFORM_WIN64,
     'Windows-x86_64': PLATFORM_WIN64,
     'Windows-AMD64': PLATFORM_WIN64,
@@ -128,9 +141,10 @@ EXPORT_KEY_VALUE = 'key-value'
 
 
 global_quiet = False
-global_idf_path = None
-global_idf_tools_path = None
-global_tools_json = None
+global_non_interactive = False
+global_idf_path = None  # type: typing.Optional[str]
+global_idf_tools_path = None  # type: typing.Optional[str]
+global_tools_json = None  # type: typing.Optional[str]
 
 
 def fatal(text, *args):
@@ -174,7 +188,7 @@ def run_cmd_check_output(cmd, input_text=None, extra_paths=None):
             input_text = input_text.encode()
         result = subprocess.run(cmd, capture_output=True, check=True, input=input_text)
         return result.stdout + result.stderr
-    except AttributeError:
+    except (AttributeError, TypeError):
         p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
         stdout, stderr = p.communicate(input_text)
         if p.returncode != 0:
@@ -251,13 +265,34 @@ def unpack(filename, destination):
     archive_obj.extractall(destination)
 
 
+# Sometimes renaming a directory on Windows (randomly?) causes a PermissionError.
+# This is confirmed to be a workaround:
+# https://github.com/espressif/esp-idf/issues/3819#issuecomment-515167118
+# https://github.com/espressif/esp-idf/issues/4063#issuecomment-531490140
+# https://stackoverflow.com/a/43046729
+def rename_with_retry(path_from, path_to):
+    if sys.platform.startswith('win'):
+        retry_count = 100
+    else:
+        retry_count = 1
+
+    for retry in range(retry_count):
+        try:
+            os.rename(path_from, path_to)
+            return
+        except (OSError, WindowsError):       # WindowsError until Python 3.3, then OSError
+            if retry == retry_count - 1:
+                raise
+            warn('Rename {} to {} failed, retrying...'.format(path_from, path_to))
+
+
 def strip_container_dirs(path, levels):
     assert levels > 0
     # move the original directory out of the way (add a .tmp suffix)
     tmp_path = path + '.tmp'
     if os.path.exists(tmp_path):
         shutil.rmtree(tmp_path)
-    os.rename(path, tmp_path)
+    rename_with_retry(path, tmp_path)
     os.mkdir(path)
     base_path = tmp_path
     # walk given number of levels down
@@ -273,7 +308,7 @@ def strip_container_dirs(path, levels):
     for name in contents:
         move_from = os.path.join(base_path, name)
         move_to = os.path.join(path, name)
-        os.rename(move_from, move_to)
+        rename_with_retry(move_from, move_to)
     shutil.rmtree(tmp_path)
 
 
@@ -326,7 +361,7 @@ class IDFToolVersion(object):
     def add_download(self, platform_name, url, size, sha256):
         self.downloads[platform_name] = IDFToolDownload(platform_name, url, size, sha256)
 
-    def get_download_for_platform(self, platform_name):
+    def get_download_for_platform(self, platform_name):  # type: (str) -> IDFToolDownload
         if platform_name in PLATFORM_FROM_NAME.keys():
             platform_name = PLATFORM_FROM_NAME[platform_name]
         if platform_name in self.downloads.keys():
@@ -337,6 +372,9 @@ class IDFToolVersion(object):
 
     def compatible_with_platform(self, platform_name=PYTHON_PLATFORM):
         return self.get_download_for_platform(platform_name) is not None
+
+    def get_supported_platforms(self):  # type: () -> typing.Set[str]
+        return set(self.downloads.keys())
 
 
 OPTIONS_LIST = ['version_cmd',
@@ -362,7 +400,7 @@ class IDFTool(object):
                  strip_container_dirs=0):
         self.name = name
         self.description = description
-        self.versions = OrderedDict()
+        self.versions = OrderedDict()  # type: typing.Dict[str, IDFToolVersion]
         self.version_in_path = None
         self.versions_installed = []
         if version_regex_replace is None:
@@ -370,12 +408,19 @@ class IDFTool(object):
         self.options = IDFToolOptions(version_cmd, version_regex, version_regex_replace,
                                       [], OrderedDict(), install, info_url, license, strip_container_dirs)
         self.platform_overrides = []
+        self._platform = CURRENT_PLATFORM
         self._update_current_options()
+
+    def copy_for_platform(self, platform):  # type: (str) -> IDFTool
+        result = copy.deepcopy(self)
+        result._platform = platform
+        result._update_current_options()
+        return result
 
     def _update_current_options(self):
         self._current_options = IDFToolOptions(*self.options)
         for override in self.platform_overrides:
-            if CURRENT_PLATFORM not in override['platforms']:
+            if self._platform not in override['platforms']:
                 continue
             override_dict = override.copy()
             del override_dict['platforms']
@@ -385,18 +430,18 @@ class IDFTool(object):
         assert(type(version) is IDFToolVersion)
         self.versions[version.version] = version
 
-    def get_path(self):
+    def get_path(self):  # type: () -> str
         return os.path.join(global_idf_tools_path, 'tools', self.name)
 
-    def get_path_for_version(self, version):
+    def get_path_for_version(self, version):  # type: (str) -> str
         assert(version in self.versions)
         return os.path.join(self.get_path(), version)
 
-    def get_export_paths(self, version):
+    def get_export_paths(self, version):  # type: (str) -> typing.List[str]
         tool_path = self.get_path_for_version(version)
         return [os.path.join(tool_path, *p) for p in self._current_options.export_paths]
 
-    def get_export_vars(self, version):
+    def get_export_vars(self, version):  # type: (str) -> typing.Dict[str]
         """
         Get the dictionary of environment variables to be exported, for the given version.
         Expands:
@@ -411,7 +456,7 @@ class IDFTool(object):
             result[k] = v_repl
         return result
 
-    def check_version(self, extra_paths=None):
+    def check_version(self, extra_paths=None):  # type: (typing.Optional[typing.List[str]]) -> str
         """
         Execute the tool, optionally prepending extra_paths to PATH,
         extract the version string and return it as a result.
@@ -420,6 +465,8 @@ class IDFTool(object):
         Returns 'unknown' if tool returns something from which version string
         can not be extracted.
         """
+        # this function can not be called for a different platform
+        assert self._platform == CURRENT_PLATFORM
         cmd = self._current_options.version_cmd
         try:
             version_cmd_result = run_cmd_check_output(cmd, None, extra_paths)
@@ -430,7 +477,7 @@ class IDFTool(object):
             raise ToolExecError('Command {} has returned non-zero exit code ({})\n'.format(
                 ' '.join(self._current_options.version_cmd), e.returncode))
 
-        in_str = version_cmd_result.decode()
+        in_str = version_cmd_result.decode("utf-8")
         match = re.search(self._current_options.version_regex, in_str)
         if not match:
             return UNKNOWN_VERSION
@@ -439,10 +486,19 @@ class IDFTool(object):
     def get_install_type(self):
         return self._current_options.install
 
+    def compatible_with_platform(self):
+        return any([v.compatible_with_platform() for v in self.versions.values()])
+
+    def get_supported_platforms(self):  # type: () -> typing.Set[str]
+        result = set()
+        for v in self.versions.values():
+            result.update(v.get_supported_platforms())
+        return result
+
     def get_recommended_version(self):
         recommended_versions = [k for k, v in self.versions.items()
                                 if v.status == IDFToolVersion.STATUS_RECOMMENDED
-                                and v.compatible_with_platform()]
+                                and v.compatible_with_platform(self._platform)]
         assert len(recommended_versions) <= 1
         if recommended_versions:
             return recommended_versions[0]
@@ -451,7 +507,7 @@ class IDFTool(object):
     def get_preferred_installed_version(self):
         recommended_versions = [k for k in self.versions_installed
                                 if self.versions[k].status == IDFToolVersion.STATUS_RECOMMENDED
-                                and self.versions[k].compatible_with_platform()]
+                                and self.versions[k].compatible_with_platform(self._platform)]
         assert len(recommended_versions) <= 1
         if recommended_versions:
             return recommended_versions[0]
@@ -462,6 +518,8 @@ class IDFTool(object):
         Checks whether the tool can be found in PATH and in global_idf_tools_path.
         Writes results to self.version_in_path and self.versions_installed.
         """
+        # this function can not be called for a different platform
+        assert self._platform == CURRENT_PLATFORM
         # First check if the tool is in system PATH
         try:
             ver_str = self.check_version()
@@ -499,9 +557,9 @@ class IDFTool(object):
 
     def download(self, version):
         assert(version in self.versions)
-        download_obj = self.versions[version].get_download_for_platform(PYTHON_PLATFORM)
+        download_obj = self.versions[version].get_download_for_platform(self._platform)
         if not download_obj:
-            fatal('No packages for tool {} platform {}!'.format(self.name, PYTHON_PLATFORM))
+            fatal('No packages for tool {} platform {}!'.format(self.name, self._platform))
             raise DownloadError()
 
         url = download_obj.url
@@ -521,13 +579,18 @@ class IDFTool(object):
         for retry in range(DOWNLOAD_RETRY_COUNT):
             local_temp_path = local_path + '.tmp'
             info('Downloading {} to {}'.format(archive_name, local_temp_path))
-            urlretrieve(url, local_temp_path, report_progress)
-            sys.stdout.write("\rDone\n")
+            try:
+                urlretrieve(url, local_temp_path, report_progress if not global_non_interactive else None)
+                sys.stdout.write("\rDone\n")
+            except Exception as e:
+                # urlretrieve could throw different exceptions, e.g. IOError when the server is down
+                # Errors are ignored because the downloaded file is checked a couple of lines later.
+                warn('Download failure {}'.format(e))
             sys.stdout.flush()
-            if not self.check_download_file(download_obj, local_temp_path):
-                warn('Failed to download file {}'.format(local_temp_path))
+            if not os.path.isfile(local_temp_path) or not self.check_download_file(download_obj, local_temp_path):
+                warn('Failed to download {} to {}'.format(url, local_temp_path))
                 continue
-            os.rename(local_temp_path, local_path)
+            rename_with_retry(local_temp_path, local_path)
             downloaded = True
             break
         if not downloaded:
@@ -538,7 +601,7 @@ class IDFTool(object):
         # Currently this is called after calling 'download' method, so here are a few asserts
         # for the conditions which should be true once that method is done.
         assert (version in self.versions)
-        download_obj = self.versions[version].get_download_for_platform(PYTHON_PLATFORM)
+        download_obj = self.versions[version].get_download_for_platform(self._platform)
         assert (download_obj is not None)
         archive_name = os.path.basename(download_obj.url)
         archive_path = os.path.join(global_idf_tools_path, 'dist', archive_name)
@@ -558,10 +621,10 @@ class IDFTool(object):
         expected_size = download_obj.size
         file_size, file_sha256 = get_file_size_sha256(local_path)
         if file_size != expected_size:
-            warn('file size mismatch for {0}'.format(local_path))
+            warn('file size mismatch for {}, expected {}, got {}'.format(local_path, expected_size, file_size))
             return False
         if file_sha256 != expected_sha256:
-            warn('hash mismatch for {0}'.format(local_path))
+            warn('hash mismatch for {}, expected {}, got {}'.format(local_path, expected_sha256, file_sha256))
             return False
         return True
 
@@ -743,7 +806,7 @@ class IDFTool(object):
         return tool_json
 
 
-def load_tools_info():
+def load_tools_info():  # type: () -> typing.Dict[str, IDFTool]
     """
     Load tools metadata from tools.json, return a dictionary: tool name - tool info
     """
@@ -793,9 +856,32 @@ def get_python_env_path():
         with open(version_file_path, "r") as version_file:
             idf_version_str = version_file.read()
     else:
-        idf_version_str = subprocess.check_output(['git', '-C', global_idf_path, 'describe', '--tags'], cwd=global_idf_path, env=os.environ).decode()
+        try:
+            idf_version_str = subprocess.check_output(['git', 'describe', '--tags'],
+                                                      cwd=global_idf_path, env=os.environ).decode()
+        except subprocess.CalledProcessError as e:
+            warn('Git describe was unsuccessul: {}'.format(e))
+            idf_version_str = ''
     match = re.match(r'^v([0-9]+\.[0-9]+).*', idf_version_str)
-    idf_version = match.group(1)
+    if match:
+        idf_version = match.group(1)
+    else:
+        idf_version = None
+        # fallback when IDF is a shallow clone
+        try:
+            with open(os.path.join(global_idf_path, 'components', 'esp_common', 'include', 'esp_idf_version.h')) as f:
+                m = re.search(r'^#define\s+ESP_IDF_VERSION_MAJOR\s+(\d+).+?^#define\s+ESP_IDF_VERSION_MINOR\s+(\d+)',
+                              f.read(), re.DOTALL | re.MULTILINE)
+                if m:
+                    idf_version = '.'.join((m.group(1), m.group(2)))
+                else:
+                    warn('Reading IDF version from C header file failed!')
+        except Exception as e:
+            warn('Is it not possible to determine the IDF version: {}'.format(e))
+
+    if idf_version is None:
+        fatal('IDF version cannot be determined')
+        raise SystemExit(1)
 
     idf_python_env_path = os.path.join(global_idf_tools_path, 'python_env',
                                        'idf{}_py{}_env'.format(idf_version, python_ver_major_minor))
@@ -980,7 +1066,7 @@ def action_export(args):
         raise SystemExit(1)
 
 
-def apply_mirror_prefix_map(args, tool_obj, tool_version):
+def apply_mirror_prefix_map(args, tool_download_obj):
     """Rewrite URL for given tool_obj, given tool_version, and current platform,
        if --mirror-prefix-map flag or IDF_MIRROR_PREFIX_MAP environment variable is given.
     """
@@ -993,25 +1079,71 @@ def apply_mirror_prefix_map(args, tool_obj, tool_version):
             warn('Both IDF_MIRROR_PREFIX_MAP environment variable and --mirror-prefix-map flag are specified, ' +
                  'will use the value from the command line.')
         mirror_prefix_map = args.mirror_prefix_map
-    download_obj = tool_obj.versions[tool_version].get_download_for_platform(PYTHON_PLATFORM)
-    if mirror_prefix_map and download_obj:
+    if mirror_prefix_map and tool_download_obj:
         for item in mirror_prefix_map:
             if URL_PREFIX_MAP_SEPARATOR not in item:
                 warn('invalid mirror-prefix-map item (missing \'{}\') {}'.format(URL_PREFIX_MAP_SEPARATOR, item))
                 continue
             search, replace = item.split(URL_PREFIX_MAP_SEPARATOR, 1)
-            old_url = download_obj.url
+            old_url = tool_download_obj.url
             new_url = re.sub(search, replace, old_url)
             if new_url != old_url:
                 info('Changed download URL: {} => {}'.format(old_url, new_url))
-                download_obj.url = new_url
+                tool_download_obj.url = new_url
                 break
+
+
+def action_download(args):
+    tools_info = load_tools_info()
+    tools_spec = args.tools
+
+    if args.platform not in PLATFORM_FROM_NAME:
+        fatal('unknown platform: {}' % args.platform)
+        raise SystemExit(1)
+    platform = PLATFORM_FROM_NAME[args.platform]
+
+    tools_info_for_platform = OrderedDict()
+    for name, tool_obj in tools_info.items():
+        tool_for_platform = tool_obj.copy_for_platform(platform)
+        tools_info_for_platform[name] = tool_for_platform
+
+    if not tools_spec or 'required' in tools_spec:
+        tools_spec = [k for k, v in tools_info_for_platform.items() if v.get_install_type() == IDFTool.INSTALL_ALWAYS]
+        info('Downloading tools for {}: {}'.format(platform, ', '.join(tools_spec)))
+    elif 'all' in tools_spec:
+        tools_spec = [k for k, v in tools_info_for_platform.items() if v.get_install_type() != IDFTool.INSTALL_NEVER]
+        info('Downloading tools for {}: {}'.format(platform, ', '.join(tools_spec)))
+
+    for tool_spec in tools_spec:
+        if '@' not in tool_spec:
+            tool_name = tool_spec
+            tool_version = None
+        else:
+            tool_name, tool_version = tool_spec.split('@', 1)
+        if tool_name not in tools_info_for_platform:
+            fatal('unknown tool name: {}'.format(tool_name))
+            raise SystemExit(1)
+        tool_obj = tools_info_for_platform[tool_name]
+        if tool_version is not None and tool_version not in tool_obj.versions:
+            fatal('unknown version for tool {}: {}'.format(tool_name, tool_version))
+            raise SystemExit(1)
+        if tool_version is None:
+            tool_version = tool_obj.get_recommended_version()
+        if tool_version is None:
+            fatal('tool {} not found for {} platform'.format(tool_name, platform))
+            raise SystemExit(1)
+        tool_spec = '{}@{}'.format(tool_name, tool_version)
+
+        info('Downloading {}'.format(tool_spec))
+        apply_mirror_prefix_map(args, tool_obj.versions[tool_version].get_download_for_platform(platform))
+
+        tool_obj.download(tool_version)
 
 
 def action_install(args):
     tools_info = load_tools_info()
     tools_spec = args.tools
-    if not tools_spec:
+    if not tools_spec or 'required' in tools_spec:
         tools_spec = [k for k, v in tools_info.items() if v.get_install_type() == IDFTool.INSTALL_ALWAYS]
         info('Installing tools: {}'.format(', '.join(tools_spec)))
     elif 'all' in tools_spec:
@@ -1028,6 +1160,9 @@ def action_install(args):
             fatal('unknown tool name: {}'.format(tool_name))
             raise SystemExit(1)
         tool_obj = tools_info[tool_name]
+        if not tool_obj.compatible_with_platform():
+            fatal('tool {} does not have versions compatible with platform {}'.format(tool_name, CURRENT_PLATFORM))
+            raise SystemExit(1)
         if tool_version is not None and tool_version not in tool_obj.versions:
             fatal('unknown version for tool {}: {}'.format(tool_name, tool_version))
             raise SystemExit(1)
@@ -1041,7 +1176,7 @@ def action_install(args):
             continue
 
         info('Installing {}'.format(tool_spec))
-        apply_mirror_prefix_map(args, tool_obj, tool_version)
+        apply_mirror_prefix_map(args, tool_obj.versions[tool_version].get_download_for_platform(PYTHON_PLATFORM))
 
         tool_obj.download(tool_version)
         tool_obj.install(tool_version)
@@ -1064,7 +1199,7 @@ def action_install_python_env(args):
             subprocess.check_call([sys.executable, '-m', 'pip', 'install', '--user', 'virtualenv'],
                                   stdout=sys.stdout, stderr=sys.stderr)
 
-        subprocess.check_call([sys.executable, '-m', 'virtualenv', '--no-site-packages', idf_python_env_path],
+        subprocess.check_call([sys.executable, '-m', 'virtualenv', idf_python_env_path],
                               stdout=sys.stdout, stderr=sys.stderr)
     run_args = [virtualenv_python, '-m', 'pip', 'install', '--no-warn-script-location']
     requirements_txt = os.path.join(global_idf_path, 'requirements.txt')
@@ -1146,10 +1281,92 @@ def action_validate(args):
     # on failure, this will raise an exception with a fairly verbose diagnostic message
 
 
+def action_gen_doc(args):
+    f = args.output
+    tools_info = load_tools_info()
+
+    def print_out(text):
+        f.write(text + '\n')
+
+    print_out(".. |zwsp| unicode:: U+200B")
+    print_out("   :trim:")
+    print_out("")
+
+    idf_gh_url = "https://github.com/espressif/esp-idf"
+    for tool_name, tool_obj in tools_info.items():
+        info_url = tool_obj.options.info_url
+        if idf_gh_url + "/tree" in info_url:
+            info_url = re.sub(idf_gh_url + r"/tree/\w+/(.*)", r":idf:`\1`", info_url)
+
+        license_url = "https://spdx.org/licenses/" + tool_obj.options.license
+
+        print_out("""
+.. _tool-{name}:
+
+{name}
+{underline}
+
+{description}
+
+.. include:: idf-tools-notes.inc
+   :start-after: tool-{name}-notes
+   :end-before: ---
+
+License: `{license} <{license_url}>`_
+
+More info: {info_url}
+
+.. list-table::
+   :widths: 10 10 80
+   :header-rows: 1
+
+   * - Platform
+     - Required
+     - Download
+""".rstrip().format(name=tool_name,
+                    underline=args.heading_underline_char * len(tool_name),
+                    description=tool_obj.description,
+                    license=tool_obj.options.license,
+                    license_url=license_url,
+                    info_url=info_url))
+
+        for platform_name in sorted(tool_obj.get_supported_platforms()):
+            platform_tool = tool_obj.copy_for_platform(platform_name)
+            install_type = platform_tool.get_install_type()
+            if install_type == IDFTool.INSTALL_NEVER:
+                continue
+            elif install_type == IDFTool.INSTALL_ALWAYS:
+                install_type_str = "required"
+            elif install_type == IDFTool.INSTALL_ON_REQUEST:
+                install_type_str = "optional"
+            else:
+                raise NotImplementedError()
+
+            version = platform_tool.get_recommended_version()
+            version_obj = platform_tool.versions[version]
+            download_obj = version_obj.get_download_for_platform(platform_name)
+
+            # Note: keep the list entries indented to the same number of columns
+            # as the list header above.
+            print_out("""
+   * - {}
+     - {}
+     - {}
+
+       .. rst-class:: tool-sha256
+
+          SHA256: {}
+""".strip('\n').format(platform_name, install_type_str, download_obj.url, download_obj.sha256))
+
+        print_out('')
+    print_out('')
+
+
 def main(argv):
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--quiet', help='Don\'t output diagnostic messages to stdout/stderr', action='store_true')
+    parser.add_argument('--non-interactive', help='Don\'t output interactive messages and questions', action='store_true')
     parser.add_argument('--tools-json', help='Path to the tools.json file to use')
     parser.add_argument('--idf-path', help='ESP-IDF path to use')
 
@@ -1165,13 +1382,25 @@ def main(argv):
                                                 'will be used instead. If this flag is given, the version in PATH ' +
                                                 'will be used.', action='store_true')
     install = subparsers.add_parser('install', help='Download and install tools into the tools directory')
+    install.add_argument('tools', metavar='TOOL', nargs='*', default=['required'],
+                         help='Tools to install. ' +
+                         'To install a specific version use <tool_name>@<version> syntax. ' +
+                         'Use empty or \'required\' to install required tools, not optional ones. ' +
+                         'Use \'all\' to install all tools, including the optional ones.')
+
+    download = subparsers.add_parser('download', help='Download the tools into the dist directory')
+    download.add_argument('--platform', help='Platform to download the tools for')
+    download.add_argument('tools', metavar='TOOL', nargs='*', default=['required'],
+                          help='Tools to download. ' +
+                          'To download a specific version use <tool_name>@<version> syntax. ' +
+                          'Use empty or \'required\' to download required tools, not optional ones. ' +
+                          'Use \'all\' to download all tools, including the optional ones.')
+
     if IDF_MAINTAINER:
-        install.add_argument('--mirror-prefix-map', nargs='*',
-                             help='Pattern to rewrite download URLs, with source and replacement separated by comma.' +
-                                  ' E.g. http://foo.com,http://test.foo.com')
-    install.add_argument('tools', nargs='*', help='Tools to install. ' +
-                                                  'To install a specific version use tool_name@version syntax.' +
-                                                  'Use \'all\' to install all tools, including the optional ones.')
+        for subparser in [download, install]:
+            subparser.add_argument('--mirror-prefix-map', nargs='*',
+                                   help='Pattern to rewrite download URLs, with source and replacement separated by comma.' +
+                                        ' E.g. http://foo.com,http://test.foo.com')
 
     install_python_env = subparsers.add_parser('install-python-env',
                                                help='Create Python virtual environment and install the ' +
@@ -1194,6 +1423,11 @@ def main(argv):
 
         subparsers.add_parser('validate', help='Validate tools.json against schema file')
 
+        gen_doc = subparsers.add_parser('gen-doc', help='Write the list of tools as a documentation page')
+        gen_doc.add_argument('--output', type=argparse.FileType('w'), default=sys.stdout,
+                             help='Output file name')
+        gen_doc.add_argument('--heading-underline-char', help='Character to use when generating RST sections', default='~')
+
     args = parser.parse_args(argv)
 
     if args.action is None:
@@ -1204,15 +1438,25 @@ def main(argv):
         global global_quiet
         global_quiet = True
 
+    if args.non_interactive:
+        global global_non_interactive
+        global_non_interactive = True
+
     global global_idf_path
     global_idf_path = os.environ.get('IDF_PATH')
     if args.idf_path:
         global_idf_path = args.idf_path
     if not global_idf_path:
         global_idf_path = os.path.realpath(os.path.join(os.path.dirname(__file__), ".."))
+    os.environ['IDF_PATH'] = global_idf_path
 
     global global_idf_tools_path
     global_idf_tools_path = os.environ.get('IDF_TOOLS_PATH') or os.path.expanduser(IDF_TOOLS_PATH_DEFAULT)
+
+    # On macOS, unset __PYVENV_LAUNCHER__ variable if it is set.
+    # Otherwise sys.executable keeps pointing to the system Python, even when a python binary from a virtualenv is invoked.
+    # See https://bugs.python.org/issue22490#msg283859.
+    os.environ.pop('__PYVENV_LAUNCHER__', None)
 
     if sys.version_info.major == 2:
         try:

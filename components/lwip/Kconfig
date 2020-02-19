@@ -1,5 +1,20 @@
 menu "LWIP"
 
+    config LWIP_LOCAL_HOSTNAME
+        string "Local netif hostname"
+        default 'espressif'
+        help
+            The default name this device will report to other devices on the network.
+            Could be updated at runtime with esp_netif_set_hostname()
+
+    config LWIP_DNS_SUPPORT_MDNS_QUERIES
+        bool "Enable mDNS queries in resolving host name"
+        default y
+        help
+            If this feature is enabled, standard API such as gethostbyname
+            support .local addresses by sending one shot multicast mDNS
+            query
+
     config LWIP_L2_TO_L3_COPY
         bool "Enable copy between Layer2 and Layer3 packets"
         default n
@@ -26,6 +41,16 @@ menu "LWIP"
             10KB IRAM for these optimizations.
 
             If this feature is disabled, all lwip functions will be put into FLASH.
+
+    config LWIP_TIMERS_ONDEMAND
+        bool "Enable LWIP Timers on demand"
+        default y
+        help
+            If this feature is enabled, IGMP and MLD6 timers will be activated only
+            when joining groups or receiving QUERY packets.
+
+            This feature will reduce the power consumption for applications which do not
+            use IGMP and MLD6.
 
     config LWIP_MAX_SOCKETS
         int "Max number of open sockets"
@@ -74,18 +99,16 @@ menu "LWIP"
         help
             Enabling this option allows checking for available data on a netconn.
 
-    config LWIP_DHCP_MAX_NTP_SERVERS
-        int "Maximum number of NTP servers"
-        default 1
-        range 1 16
+    config LWIP_NETBUF_RECVINFO
+        bool "Enable IP_PKTINFO option"
+        default n
         help
-            Set maximum number of NTP servers used by LwIP SNTP module.
-            First argument of sntp_setserver/sntp_setservername functions
-            is limited to this value.
+            Enabling this option allows checking for the destination address
+            of a received IPv4 Packet.
 
     config LWIP_IP_FRAG
         bool "Enable fragment outgoing IP packets"
-        default n
+        default y
         help
             Enabling this option allows fragmenting outgoing IP packets if their size
             exceeds MTU.
@@ -148,7 +171,8 @@ menu "LWIP"
     config LWIP_TCPIP_RECVMBOX_SIZE
         int "TCPIP task receive mail box size"
         default 32
-        range 6 64
+        range 6 64 if !LWIP_WND_SCALE
+        range 6 1024 if LWIP_WND_SCALE
         help
             Set TCPIP task receive mail box size. Generally bigger value means higher throughput
             but more memory. The value should be bigger than UDP/TCP mail box size.
@@ -303,6 +327,15 @@ menu "LWIP"
                 IPv4 TCP_MSS Range: 576 <= TCP_MSS <= 1460
                 IPv6 TCP_MSS Range: 1220<= TCP_mSS <= 1440
 
+        config LWIP_TCP_TMR_INTERVAL
+            int "TCP timer interval(ms)"
+            default 250
+            help
+                Set TCP timer interval in milliseconds.
+
+                Can be used to speed connections on bad networks.
+                A lower value will redeliver unacked packets faster.
+
         config LWIP_TCP_MSL
             int "Maximum segment lifetime (MSL)"
             default 60000
@@ -312,7 +345,8 @@ menu "LWIP"
         config LWIP_TCP_SND_BUF_DEFAULT
             int "Default send buffer size"
             default 5744  # 4 * default MSS
-            range 2440 65535
+            range 2440 65535 if !LWIP_WND_SCALE
+            range 2440 1024000 if LWIP_WND_SCALE
             help
                 Set default send buffer size for new TCP sockets.
 
@@ -328,7 +362,8 @@ menu "LWIP"
         config LWIP_TCP_WND_DEFAULT
             int "Default receive window size"
             default 5744 # 4 * default MSS
-            range 2440 65535
+            range 2440 65535 if !LWIP_WND_SCALE
+            range 2440 1024000 if LWIP_WND_SCALE
             help
                 Set default TCP receive window size for new TCP sockets.
 
@@ -341,7 +376,8 @@ menu "LWIP"
         config LWIP_TCP_RECVMBOX_SIZE
             int "Default TCP receive mail box size"
             default 6
-            range 6 64
+            range 6 64 if !LWIP_WND_SCALE
+            range 6 1024 if LWIP_WND_SCALE
             help
                 Set TCP receive mail box size. Generally bigger value means higher throughput
                 but more memory. The recommended value is: LWIP_TCP_WND_DEFAULT/TCP_MSS + 2, e.g. if
@@ -366,6 +402,12 @@ menu "LWIP"
 
                 Disable this option to save some RAM during TCP sessions, at the expense
                 of increased retransmissions if segments arrive out of order.
+
+        config LWIP_TCP_SACK_OUT
+            bool "Support sending selective acknowledgements"
+            default n
+            help
+                TCP will support sending selective acknowledgements (SACKs).
 
         config LWIP_TCP_KEEP_CONNECTION_WHEN_IP_CHANGES
             bool "Keep TCP connections when IP changed"
@@ -400,6 +442,21 @@ menu "LWIP"
                 bool "Disabled"
 
         endchoice
+
+        config LWIP_WND_SCALE
+            bool "Support TCP window scale"
+            depends on SPIRAM_TRY_ALLOCATE_WIFI_LWIP
+            default n
+            help
+                Enable this feature to support TCP window scaling.
+
+        config LWIP_TCP_RCV_SCALE
+            int "Set TCP receiving window scaling factor"
+            depends on LWIP_WND_SCALE
+            range 0 14
+            default 0
+            help
+                Enable this feature to support TCP window scaling.
 
     endmenu # TCP
 
@@ -544,5 +601,27 @@ menu "LWIP"
                 limit is determined by available heap memory at runtime.
 
     endmenu  # LWIP RAW API
+
+    menu "SNTP"
+
+        config LWIP_DHCP_MAX_NTP_SERVERS
+            int "Maximum number of NTP servers"
+            default 1
+            range 1 16
+            help
+                Set maximum number of NTP servers used by LwIP SNTP module.
+                First argument of sntp_setserver/sntp_setservername functions
+                is limited to this value.
+
+        config LWIP_SNTP_UPDATE_DELAY
+            int "Request interval to update time (ms)"
+            range 15000 4294967295
+            default 3600000
+            help
+                This option allows you to set the time update period via SNTP.
+                Default is 1 hour. Must not be below 15 seconds by specification.
+                (SNTPv4 RFC 4330 enforces a minimum update time of 15 seconds).
+
+    endmenu # SNTP
 
 endmenu

@@ -1,54 +1,61 @@
 Ethernet
 ========
 
+:link_to_translation:`zh_CN:[中文]`
+
 Application Example
 -------------------
 
--   Ethernet basic example: :example:`ethernet/ethernet`.
+-   Ethernet basic example: :example:`ethernet/basic`.
 -   Ethernet iperf example: :example:`ethernet/iperf`.
+-   Ethernet to Wi-Fi AP "router": :example:`ethernet/eth2ap`.
 
-PHY Interfaces
---------------
+Ethernet Driver Model
+---------------------
 
-The configured PHY model(s) are set in software by configuring the eth_config_t structure for the given PHY.
+  * :component_file:`esp_eth/include/esp_eth.h`
 
-Headers include a default configuration structure. These default configurations will need some members overriden or re-set before they can be used for a particular PHY hardware configuration. Consult the Ethernet example to see how this is done.
-
-  * :component_file:`ethernet/include/eth_phy/phy.h` (common)
-  * :component_file:`ethernet/include/eth_phy/phy_tlk110.h`
-  * :component_file:`ethernet/include/eth_phy/phy_lan8720.h`
-  * :component_file:`ethernet/include/eth_phy/phy_ip101.h`
-
-PHY Configuration Constants
-^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-.. doxygenvariable:: phy_tlk110_default_ethernet_config
-.. doxygenvariable:: phy_lan8720_default_ethernet_config
-.. doxygenvariable:: phy_ip101_default_ethernet_config
-
-
-API Reference - Ethernet
-------------------------
-
-.. include:: /_build/inc/esp_eth.inc
-
-API Reference - PHY Common
---------------------------
-
-.. include:: /_build/inc/phy.inc
-
-API Reference - PHY TLK110
---------------------------
-
-.. include:: /_build/inc/phy_tlk110.inc
-
-API Reference - PHY LAN8720
----------------------------
-
-.. include:: /_build/inc/phy_lan8720.inc
-
-API Reference - PHY IP101
+Ethernet Common Interface
 -------------------------
 
-.. include:: /_build/inc/phy_ip101.inc
+  * :component_file:`esp_eth/include/esp_eth_com.h`
 
+Ethernet MAC Interface
+----------------------
+
+  * :component_file:`esp_eth/include/esp_eth_mac.h`
+
+Ethernet PHY Interface
+----------------------
+
+  * :component_file:`esp_eth/include/esp_eth_phy.h`
+
+Ethernet PHY Common Registers
+-----------------------------
+
+  * :component_file:`esp_eth/include/eth_phy_regs_struct.h`
+
+API Reference - Driver Model
+----------------------------
+
+.. include-build-file:: inc/esp_eth.inc
+
+API Reference - Common Interface
+--------------------------------
+
+.. include-build-file:: inc/esp_eth_com.inc
+
+API Reference - MAC Interface
+-----------------------------
+
+.. include-build-file:: inc/esp_eth_mac.inc
+
+API Reference - PHY Interface
+-----------------------------
+
+.. include-build-file:: inc/esp_eth_phy.inc
+
+API Reference - Glue for esp_netif
+----------------------------------
+
+.. include-build-file:: inc/esp_eth_netif_glue.inc
