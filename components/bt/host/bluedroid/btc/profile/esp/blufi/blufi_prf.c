@@ -612,7 +612,7 @@ void btc_blufi_send_wifi_list(uint16_t apCount, esp_blufi_ap_record_t *list)
     int data_len;
     uint8_t *p;
     // malloc size: (len + RSSI + ssid buffer) * apCount;
-    uint malloc_size = (1 + 1 + sizeof(list->ssid)) * apCount;
+    uint malloc_size = (1 + 1 + 1 + sizeof(list->ssid)) * apCount; // DON EDVALSON add an extra 1 for channel
     p = data = osi_malloc(malloc_size);
     if (data == NULL) {
         BTC_TRACE_ERROR("malloc error\n");

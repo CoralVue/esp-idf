@@ -151,7 +151,7 @@ extern "C" esp_err_t nvs_flash_init_partition(const char *part_name)
     }
 
     const esp_partition_t* partition = esp_partition_find_first(
-            ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_NVS, part_name);
+            ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, part_name);
     if (partition == NULL) {
         return ESP_ERR_NOT_FOUND;
     }
