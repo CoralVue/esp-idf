@@ -7,8 +7,9 @@
 #ifndef _BLE_MESH_HCI_H_
 #define _BLE_MESH_HCI_H_
 
-#include "mesh_atomic.h"
+#include "mesh_kernel.h"
 #include "mesh_bearer_adapt.h"
+#include "mesh_atomic.h"
 
 #ifdef __cplusplus
 extern "C" {

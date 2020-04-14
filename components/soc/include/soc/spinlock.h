@@ -22,12 +22,6 @@
 #include "xtensa/xtruntime.h"
 
 
-#ifdef CONFIG_SPIRAM_WORKAROUND_NEED_VOLATILE_SPINLOCK
-#define NEED_VOLATILE_MUX volatile
-#else
-#define NEED_VOLATILE_MUX
-#endif
-
 #define SPINLOCK_FREE          0xB33FFFFF
 #define SPINLOCK_WAIT_FOREVER  (-1)  
 #define SPINLOCK_NO_WAIT        0  
@@ -35,8 +29,8 @@
 #define CORE_ID_REGVAL_XOR_SWAP (0xCDCD ^ 0xABAB)
 
 typedef struct {
-    NEED_VOLATILE_MUX uint32_t owner;
-    NEED_VOLATILE_MUX uint32_t count;
+    uint32_t owner;
+    uint32_t count;
 }spinlock_t;
 
 /**

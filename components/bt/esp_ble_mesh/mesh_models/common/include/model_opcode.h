@@ -15,7 +15,7 @@
 #ifndef _MODEL_OPCODE_H_
 #define _MODEL_OPCODE_H_
 
-#include "mesh_access.h"
+#include "mesh_main.h"
 
 /* Generic OnOff Message Opcode */
 #define BLE_MESH_MODEL_OP_GEN_ONOFF_GET                          BLE_MESH_MODEL_OP_2(0x82, 0x01)
@@ -235,7 +235,7 @@
 #define BLE_MESH_MODEL_OP_LIGHT_HSL_DEFAULT_SET                  BLE_MESH_MODEL_OP_2(0x82, 0x7F)
 #define BLE_MESH_MODEL_OP_LIGHT_HSL_DEFAULT_SET_UNACK            BLE_MESH_MODEL_OP_2(0x82, 0x80)
 #define BLE_MESH_MODEL_OP_LIGHT_HSL_RANGE_SET                    BLE_MESH_MODEL_OP_2(0x82, 0x81)
-#define BLE_MESH_MODEL_OP_LIGHT_HSL_RANGE_SET_UNACK              BLE_MESH_MODEL_OP_2(0x82, 0x82)
+#define BLE_MESH_MODEL_OP_LIGHT_HSL_RANGE_SET_UNACK              BLE_MESH_MODEL_OP_2(0x82, 0x82) /* Model spec is wrong */
 
 /* Light xyL Message Opcode */
 #define BLE_MESH_MODEL_OP_LIGHT_XYL_GET                          BLE_MESH_MODEL_OP_2(0x82, 0x83)

@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#! /bin/bash
 
 # Regexp for matching job names which are incompatible with Python 3
 # - assign_test, nvs_compatible_test, IT - auto_test_script causes the incompatibility

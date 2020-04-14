@@ -23,54 +23,23 @@ function idf_export_main() {
 
     if [[ -z "${IDF_PATH}" ]]
     then
-        # IDF_PATH not set in the environment.
-        # If using bash or zsh, try to guess IDF_PATH from script location.
-        self_path=""
+        # If using bash, try to guess IDF_PATH from script location
         if [[ -n "${BASH_SOURCE}" ]]
         then
-            self_path="${BASH_SOURCE}"
-        elif [[ -n "${ZSH_VERSION}" ]]
-        then
-            self_path="${(%):-%x}"
+            if [[ "$OSTYPE" == "darwin"* ]]; then
+                script_dir="$(realpath_int $BASH_SOURCE)"
+            else
+                script_name="$(readlink -f $BASH_SOURCE)"
+                script_dir="$(dirname $script_name)"
+            fi
+            export IDF_PATH="${script_dir}"
         else
-            echo "Could not detect IDF_PATH. Please set it before sourcing this script:"
-            echo "  export IDF_PATH=(add path here)"
+            echo "IDF_PATH must be set before sourcing this script"
             return 1
         fi
-
-        if [[ "$OSTYPE" == "darwin"* ]]; then
-            # convert possibly relative path to absolute
-            script_dir="$(realpath_int ${self_path})"
-            # resolve any ../ references to make the path shorter
-            script_dir="$(cd ${script_dir}; pwd)"
-        else
-            # convert to full path and get the directory name of that
-            script_name="$(readlink -f ${self_path})"
-            script_dir="$(dirname ${script_name})"
-        fi
-        export IDF_PATH="${script_dir}"
-        echo "Setting IDF_PATH to '${IDF_PATH}'"
-    else
-        # IDF_PATH came from the environment, check if the path is valid
-        if [[ ! -d "${IDF_PATH}" ]]
-        then
-            echo "IDF_PATH is set to '${IDF_PATH}', but it is not a valid directory."
-            echo "If you have set IDF_PATH manually, check if the path is correct."
-            return 1
-        fi
-        # Check if this path looks like an IDF directory
-        if [[ ! -f "${IDF_PATH}/tools/idf.py" || ! -f "${IDF_PATH}/tools/idf_tools.py" ]]
-        then
-            echo "IDF_PATH is set to '${IDF_PATH}', but it doesn't look like an ESP-IDF directory."
-            echo "If you have set IDF_PATH manually, check if the path is correct."
-            return 1
-        fi
-
-        # The varible might have been set (rather than exported), re-export it to be sure
-        export IDF_PATH="${IDF_PATH}"
     fi
 
-    old_path="$PATH"
+    old_path=$PATH
 
     echo "Adding ESP-IDF tools to PATH..."
     # Call idf_tools.py to export tool paths
@@ -87,8 +56,7 @@ function idf_export_main() {
     # ${IDF_PATH}/tools is already added by 'idf_tools.py export'
     IDF_ADD_PATHS_EXTRAS="${IDF_PATH}/components/esptool_py/esptool"
     IDF_ADD_PATHS_EXTRAS="${IDF_ADD_PATHS_EXTRAS}:${IDF_PATH}/components/espcoredump"
-    IDF_ADD_PATHS_EXTRAS="${IDF_ADD_PATHS_EXTRAS}:${IDF_PATH}/components/partition_table"
-    IDF_ADD_PATHS_EXTRAS="${IDF_ADD_PATHS_EXTRAS}:${IDF_PATH}/components/app_update"
+    IDF_ADD_PATHS_EXTRAS="${IDF_ADD_PATHS_EXTRAS}:${IDF_PATH}/components/partition_table/"
     export PATH="${IDF_ADD_PATHS_EXTRAS}:${PATH}"
 
     if [[ -n "$BASH" ]]

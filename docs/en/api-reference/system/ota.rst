@@ -1,6 +1,5 @@
 Over The Air Updates (OTA)
 ==========================
-:link_to_translation:`zh_CN:[中文]`
 
 OTA Process Overview
 --------------------
@@ -195,16 +194,14 @@ Restrictions:
 
   - In ESP32 it is stored in efuse ``EFUSE_BLK3_RDATA4_REG``. (when a eFuse bit is programmed to 1, it can never be reverted to 0). The number of bits set in this register is the ``security_version`` from app.
 
-.. only:: esp32
+.. _secure-ota-updates:
 
-  .. _secure-ota-updates:
+Secure OTA Updates Without Secure boot
+--------------------------------------
 
-  Secure OTA Updates Without Secure boot
-  --------------------------------------
+The verification of signed OTA updates can be performed even without enabling hardware secure boot. For doing so, refer :ref:`signed-app-verify`
 
-  The verification of signed OTA updates can be performed even without enabling hardware secure boot. For doing so, refer :ref:`signed-app-verify`
 
-    
 OTA Tool (otatool.py)
 ---------------------
 

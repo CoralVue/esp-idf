@@ -791,37 +791,13 @@ Flash 参数
 
 子项目通过 :idf_file:`/components/bootloader/project_include.cmake` 文件作为外部项目插入到项目的顶层，主构建进程会运行子项目的 CMake，包括查找组件（主项目使用的组件的子集），生成引导程序专用的配置文件（从主 ``sdkconfig`` 文件中派生）。
 
-.. _selecting-idf-target:
+选择硬件目标
+============
 
-选择“目标”芯片
-====================
+当前 ESP-IDF 仅支持一个硬件目标，即 ``esp32``，这也是构建系统默认的硬件目标。开发人员可以按照如下方法来添加对新硬件目标的支持::
 
-ESP-IDF 支持多款芯片，它们通过在软件中使用不同的 “目标” (target) 名进行区分，具体对应关系如下：
-
-* ``esp32`` — 适用于 ESP32-D0WD、ESP32-D2WD、ESP32-S0WD (ESP-SOLO)、ESP32-U4WDH、ESP32-PICO-D4
-* ``esp32s2``— 适用于 ESP32-S2
-
-在构建项目前，请首先根据您的芯片选择正确的软件目标，具体命令为 ``idf.py set-target <target>``。举例 ::
-
-    idf.py set-target esp32s2
-
-.. important::
-
-    运行 ``idf.py set-target`` 命令将清除 ``build`` 文件夹的内容，并重新生成一个 ``sdkconfig`` 文件。之前的 ``sdkconfig`` 将另存为 ``sdkconfig.old``。
-
-.. note::
-
-    运行 ``idf.py set-target`` 命令相当于分别运行以下几个命令：
-
-    1. 清除 ``build`` 文件夹 (``idf.py fullclean``)
-    2. 移除 ``sdkconfig`` 文件 (``mv sdkconfig sdkconfig.old``)
-    3. 根据选择的“目标”芯片配置项目 (``idf.py -DIDF_TARGET=esp32 reconfigure``)
-
-您也可以将要用的 ``IDF_TARGET`` 设置为环境变量，比如：export IDF_TARGET=esp32s2；或设置为 CMake 变量，比如将 ``-DIDF_TARGET=esp32s2`` 以参数形式传递给 CMake 或 idf.py。如果您大多数时间仅使用一款芯片，则将 ``IDF_TARGET`` 配置为环境变量比较方便。
-
-对于特定项目，您可以使用以下方式为 ``IDF_TARGET`` 配置 _default_ 值：把 ``CONFIG_IDF_TARGET`` 的值加入 ``sdkconfig.defaults``。举例而言，配置 ``CONFIG_IDF_TARGET="esp32s2"``。这样一来，除非特别设置（比如使用环境变量、CMake 变量或 ``idf.py set-target`` 命令），否则 ``IDF_TARGET`` 将默认采用 ``CONFIG_IDF_TARGET``。
-
-如果您从未通过以上述任何方式配置过“目标”芯片，则构建系统会默认将 ``esp32`` 设定为“目标”芯片。
+    rm sdkconfig
+    idf.py -DIDF_TARGET=new_target reconfigure
 
 .. _write-pure-component:
 
@@ -939,7 +915,47 @@ JSON 配置服务器
 
 您可以通过 ``idf.py confserver`` 或 ``ninja confserver`` 从项目中运行 ``confserver.py``，也可以使用不同的构建生成器来触发类似的目标。
 
-有关 confserver.py 的更多信息，请参阅 :idf_file:`tools/kconfig_new/README.md`
+配置服务器会向 stderr 输出方便阅读的错误和警告信息，向 stdout 输出 JSON 文件。启动时，配置服务器将以 JSON 字典的形式输出系统中每个配置项的完整值，以及范围受限的值的可用范围。``sdkconfig.json`` 中包含有相同的信息::
+
+    {"version": 1, "values": { "ITEM": "value", "ITEM_2": 1024, "ITEM_3": false }, "ranges" : { "ITEM_2" : [ 0, 32768 ] } }
+
+配置服务器仅发送可见的配置项，其它不可见的或者被禁用的配置项可从 ``kconfig_menus.json`` 静态文件中解析得到，此文件还包含菜单结构和其它元数据（描述、类型、范围等）。
+
+然后配置服务器将等待客户端的输入，客户端会发起请求，要求更改一个或多个配置项的值，内容的格式是个 JSON 对象，后面跟一个换行符::
+
+    {"version": "1", "set": {"SOME_NAME": false, "OTHER_NAME": true } }
+
+配置服务器将解析此请求，更新 ``sdkconfig`` 文件，并返回完整的变更列表::
+
+    {"version": 1, "values": {"SOME_NAME": false, "OTHER_NAME": true , "DEPENDS_ON_SOME_NAME": null}}
+
+当前不可见或者禁用的配置项会返回 ``null``，任何新的可见配置项则会返回其当前新的可见值。
+
+如果配置项的取值范围因另一个值的变化发生了改变，那么配置服务器会发送::
+
+    {"version": 1, "values": {"OTHER_NAME": true }, "ranges" : { "HAS_RANGE" : [ 3, 4 ] } }
+
+如果传递的数据无效，那么 JSON 对象中会有 ``error`` 字段::
+
+    {"version": 1, "values": {}, "error": ["The following config symbol(s) were not visible so were not updated: NOT_VISIBLE_ITEM"]}
+
+默认情况下，变更后的配置不会被写进 sdkconfig 文件。更改的内容在发出 “save” 命令之前会先储存在内存中::
+
+    {"version": 1, "save": null }
+
+若要从已保存的文件中重新加载配置值，并丢弃内存中的任何更改，可以发送 “load” 命令::
+
+    {"version": 1, "load": null }
+
+“load” 和 “save” 的值可以是新的路径名，也可以设置为 "null" 用以加载/保存之前使用的路径名。
+
+配置服务器对 “load” 命令的响应始终是完整的配置值和取值范围的集合，这与服务器初始启动阶段的响应相同。
+
+“load”、“set” 和 “save” 的任意组合可以在一条单独的命令中发送出去，服务器按照组合中的顺序执行命令。因此，可以使用一条命令实现从文件中加载配置，更新配置值，然后将其保存到文件中。
+
+.. Note:: 配置服务器不会自动加载外部对 ``sdkconfig`` 文件的任何更改。如果文件被外部编辑，则需要发送 “load” 命令或重启服务器。
+
+.. Note:: ``sdkconfig`` 文件更新后，配置服务器不会重新运行 CMake 来生成其它的构建文件和元数据文件。这些文件会在下一次运行 ``CMake`` 或 ``idf.py`` 时自动生成。
 
 .. _gnu-make-to:
 
@@ -1015,7 +1031,7 @@ CMake 中不可用的功能
 .. _cmake project: https://cmake.org/cmake/help/v3.5/command/project.html
 .. _cmake set: https://cmake.org/cmake/help/v3.5/command/set.html
 .. _cmake string: https://cmake.org/cmake/help/v3.5/command/string.html
-.. _cmake faq generated files: https://gitlab.kitware.com/cmake/community/-/wikis/FAQ#how-can-i-generate-a-source-file-during-the-build
+.. _cmake faq generated files: https://cmake.org/Wiki/CMake_FAQ#How_can_I_generate_a_source_file_during_the_build.3F
 .. _ADDITIONAL_MAKE_CLEAN_FILES: https://cmake.org/cmake/help/v3.5/prop_dir/ADDITIONAL_MAKE_CLEAN_FILES.html
 .. _ExternalProject: https://cmake.org/cmake/help/v3.5/module/ExternalProject.html
 .. _cmake language variables: https://cmake.org/cmake/help/v3.5/manual/cmake-variables.7.html#variables-for-languages
@@ -1024,5 +1040,5 @@ CMake 中不可用的功能
 .. _target_link_libraries: https://cmake.org/cmake/help/v3.5/command/target_link_libraries.html#command:target_link_libraries
 .. _cmake_toolchain_file: https://cmake.org/cmake/help/v3.5/variable/CMAKE_TOOLCHAIN_FILE.html
 .. _quirc: https://github.com/dlbeer/quirc
-.. _pyenv: https://github.com/pyenv/pyenv#readme
+.. _pyenv: https://github.com/pyenv/pyenv#README
 .. _virtualenv: https://virtualenv.pypa.io/en/stable/

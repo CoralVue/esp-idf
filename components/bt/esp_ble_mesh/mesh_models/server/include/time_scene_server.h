@@ -15,6 +15,8 @@
 #ifndef _TIME_SCENE_SERVER_H_
 #define _TIME_SCENE_SERVER_H_
 
+#include "mesh_slist.h"
+#include "mesh_kernel.h"
 #include "server_common.h"
 
 /**
@@ -387,12 +389,5 @@ int bt_mesh_scene_srv_init(struct bt_mesh_model *model, bool primary);
 int bt_mesh_scene_setup_srv_init(struct bt_mesh_model *model, bool primary);
 int bt_mesh_scheduler_srv_init(struct bt_mesh_model *model, bool primary);
 int bt_mesh_scheduler_setup_srv_init(struct bt_mesh_model *model, bool primary);
-
-int bt_mesh_time_srv_deinit(struct bt_mesh_model *model, bool primary);
-int bt_mesh_time_setup_srv_deinit(struct bt_mesh_model *model, bool primary);
-int bt_mesh_scene_srv_deinit(struct bt_mesh_model *model, bool primary);
-int bt_mesh_scene_setup_srv_deinit(struct bt_mesh_model *model, bool primary);
-int bt_mesh_scheduler_srv_deinit(struct bt_mesh_model *model, bool primary);
-int bt_mesh_scheduler_setup_srv_deinit(struct bt_mesh_model *model, bool primary);
 
 #endif /* _TIME_SCENE_SERVER_H_ */

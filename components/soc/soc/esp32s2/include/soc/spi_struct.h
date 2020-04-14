@@ -17,7 +17,7 @@
 extern "C" {
 #endif
 
-typedef volatile struct spi_dev_s {
+typedef volatile struct {
     union {
         struct {
             uint32_t conf_bitlen:23;                      /*Define the spi_clk cycles of  SPI_CONF state. Can be configured in CONF state.*/

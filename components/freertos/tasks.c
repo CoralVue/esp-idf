@@ -649,7 +649,7 @@ void taskYIELD_OTHER_CORE( BaseType_t xCoreID, UBaseType_t uxPriority )
 	BaseType_t i;
 
 	if (xCoreID != tskNO_AFFINITY) {
-		if ( curTCB->uxPriority < uxPriority ) {	// NOLINT(clang-analyzer-core.NullDereference) IDF-685
+		if ( curTCB->uxPriority < uxPriority ) {
 			vPortYieldOtherCore( xCoreID );
 		}
 	}

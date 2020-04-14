@@ -176,7 +176,7 @@ void esp_timer_impl_unlock(void)
     portEXIT_CRITICAL(&s_time_update_lock);
 }
 
-int64_t IRAM_ATTR esp_timer_impl_get_time(void)
+uint64_t IRAM_ATTR esp_timer_impl_get_time(void)
 {
     uint32_t timer_val;
     uint64_t time_base;
@@ -208,8 +208,6 @@ int64_t IRAM_ATTR esp_timer_impl_get_time(void)
                         + timer_val / ticks_per_us;
     return result;
 }
-
-int64_t esp_timer_get_time(void) __attribute__((alias("esp_timer_impl_get_time")));
 
 void IRAM_ATTR esp_timer_impl_set_alarm(uint64_t timestamp)
 {

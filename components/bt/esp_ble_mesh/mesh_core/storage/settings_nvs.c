@@ -13,12 +13,17 @@
 // limitations under the License.
 
 #include <string.h>
+#include <stdio.h>
+#include <stddef.h>
 #include <errno.h>
 
 #include "nvs.h"
-#include "nvs_flash.h"
+#include "sdkconfig.h"
 
+#include "mesh_util.h"
+#include "mesh_types.h"
 #include "mesh_common.h"
+
 #include "settings_nvs.h"
 #include "settings.h"
 
@@ -36,8 +41,6 @@ struct settings_context {
     int (*settings_init)(void);
     int (*settings_load)(void);
     int (*settings_commit)(void);
-    int (*settings_deinit)(void);
-    int (*settings_erase)(void);
 };
 
 static struct settings_context settings_ctx[] = {
@@ -46,7 +49,6 @@ static struct settings_context settings_ctx[] = {
         .settings_init = settings_core_init,
         .settings_load = settings_core_load,
         .settings_commit = settings_core_commit,
-        .settings_deinit = settings_core_deinit,
     },
     [SETTINGS_SERVER] = {
         .nvs_name = "mesh_server",
@@ -60,25 +62,12 @@ static struct settings_context settings_ctx[] = {
 
 void bt_mesh_settings_foreach(void)
 {
-    int err = 0;
-    int i;
-
-#if CONFIG_BLE_MESH_SPECIFIC_PARTITION
-    err = nvs_flash_init_partition(CONFIG_BLE_MESH_PARTITION_NAME);
-    if (err != ESP_OK) {
-        BT_ERR("Failed to init mesh partition, name %s, err %d", CONFIG_BLE_MESH_PARTITION_NAME, err);
-        return;
-    }
-#endif
+    int i, err;
 
     for (i = 0; i < ARRAY_SIZE(settings_ctx); i++) {
         struct settings_context *ctx = &settings_ctx[i];
 
-#if CONFIG_BLE_MESH_SPECIFIC_PARTITION
-        err = nvs_open_from_partition(CONFIG_BLE_MESH_PARTITION_NAME, ctx->nvs_name, NVS_READWRITE, &ctx->handle);
-#else
         err = nvs_open(ctx->nvs_name, NVS_READWRITE, &ctx->handle);
-#endif
         if (err != ESP_OK) {
             BT_ERR("%s, Open nvs failed, name %s, err %d", __func__, ctx->nvs_name, err);
             continue;
@@ -101,26 +90,6 @@ void bt_mesh_settings_foreach(void)
     }
 }
 
-void bt_mesh_settings_deforeach(void)
-{
-    int i;
-
-    for (i = 0; i < ARRAY_SIZE(settings_ctx); i++) {
-        struct settings_context *ctx = &settings_ctx[i];
-
-        if (ctx->settings_deinit && ctx->settings_deinit()) {
-            BT_ERR("%s, Deinit settings failed, name %s", __func__, ctx->nvs_name);
-            continue;
-        }
-
-        nvs_close(ctx->handle);
-    }
-
-#if CONFIG_BLE_MESH_SPECIFIC_PARTITION
-    nvs_flash_deinit_partition(CONFIG_BLE_MESH_PARTITION_NAME);
-#endif
-}
-
 /* API used to get BLE Mesh related nvs handle */
 
 static inline nvs_handle settings_get_nvs_handle(enum settings_type type)
@@ -132,7 +101,7 @@ static inline nvs_handle settings_get_nvs_handle(enum settings_type type)
 
 static int settings_save(nvs_handle handle, const char *key, const u8_t *val, size_t len)
 {
-    int err = 0;
+    int err;
 
     if (key == NULL) {
         BT_ERR("%s, Invalid parameter", __func__);
@@ -176,7 +145,7 @@ int bt_mesh_save_core_settings(const char *key, const u8_t *val, size_t len)
 static int settings_load(nvs_handle handle, const char *key,
                          u8_t *buf, size_t buf_len, bool *exist)
 {
-    int err = 0;
+    int err;
 
     if (key == NULL || buf == NULL || exist == NULL) {
         BT_ERR("%s, Invalid parameter", __func__);
@@ -209,8 +178,8 @@ int bt_mesh_load_core_settings(const char *key, u8_t *buf, size_t buf_len, bool 
 
 static size_t settings_get_length(nvs_handle handle, const char *key)
 {
-    size_t len = 0U;
-    int err = 0;
+    size_t len = 0;
+    int err;
 
     if (key == NULL) {
         BT_ERR("%s, Invalid parameter", __func__);
@@ -236,9 +205,9 @@ static size_t settings_get_length(nvs_handle handle, const char *key)
 static struct net_buf_simple *settings_get_item(nvs_handle handle, const char *key)
 {
     struct net_buf_simple *buf = NULL;
-    size_t length = 0U;
-    bool exist = false;
-    int err = 0;
+    size_t length;
+    bool exist;
+    int err;
 
     length = settings_get_length(handle, key);
     if (!length) {
@@ -281,7 +250,7 @@ struct net_buf_simple *bt_mesh_get_core_settings_item(const char *key)
 static bool is_settings_item_exist(struct net_buf_simple *buf, const u16_t val)
 {
     struct net_buf_simple_state state = {0};
-    size_t length = 0U;
+    size_t length;
     int i;
 
     if (!buf) {
@@ -309,8 +278,8 @@ static int settings_add_item(nvs_handle handle, const char *key, const u16_t val
 {
     struct net_buf_simple *store = NULL;
     struct net_buf_simple *buf = NULL;
-    size_t length = 0U;
-    int err = 0;
+    size_t length = 0;
+    int err;
 
     buf = settings_get_item(handle, key);
 
@@ -354,10 +323,9 @@ static int settings_remove_item(nvs_handle handle, const char *key, const u16_t 
 {
     struct net_buf_simple *store = NULL;
     struct net_buf_simple *buf = NULL;
-    size_t length = 0U;
-    size_t buf_len = 0U;
-    int err = 0;
-    int i;
+    size_t length = 0;
+    size_t buf_len;
+    int i, err;
 
     buf = settings_get_item(handle, key);
 

@@ -14,9 +14,8 @@
 #include "lwip/sockets.h"
 #include "ping/ping_sock.h"
 #include "esp32/rom/md5_hash.h"
-#include "soc/soc_caps.h"
 
-#if SOC_EMAC_SUPPORTED
+#if !TEMPORARY_DISABLED_FOR_TARGETS(ESP32S2)
 
 static const char *TAG = "esp32_eth_test";
 
@@ -504,4 +503,4 @@ TEST_CASE("esp32 ethernet download test", "[ethernet][test_env=UT_T2_Ethernet][t
     vEventGroupDelete(eth_event_group);
 }
 
-#endif // SOC_EMAC_SUPPORTED
+#endif

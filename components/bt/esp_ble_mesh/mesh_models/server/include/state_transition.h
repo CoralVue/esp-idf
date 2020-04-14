@@ -11,7 +11,6 @@
 
 #include "server_common.h"
 #include "generic_server.h"
-#include "sensor_server.h"
 #include "lighting_server.h"
 #include "time_scene_server.h"
 

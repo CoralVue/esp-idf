@@ -104,20 +104,22 @@ NOTE: In order to run this example you need OpenOCD version `v0.10.0-esp32-20181
 
 5.  It is useful to use GDB to start and/or stop tracing automatically. To do this you need to prepare special `gdbinit` file:
 
-    ```
+    ```  
     target remote :3333
     mon reset halt
     b app_main
     commands
-    mon esp sysview start file:///tmp/sysview_example.svdat
+    mon esp32 sysview start file:///tmp/sysview_example.svdat
     # For dual-core mode uncomment the line below and comment the line above
-    # mon esp sysview start file:///tmp/sysview_example0.svdat file:///tmp/sysview_example1.svdat
+    # mon esp32 sysview start file:///tmp/sysview_example0.svdat file:///tmp/sysview_example1.svdat
     c
     end
     c
     ```
 
     Using this file GDB will connect to the target, reset it, and start tracing when it hit breakpoint at `app_main`. Trace data will be saved to `/tmp/sysview_example.svdat`.
+
+    **Note:** if running the example on ESP32-S2, modify the command name in gdbinit file from `esp32 sysview` to `esp32_s2 sysview`.
 
 6.  Run GDB using the following command from the project root directory:
 
@@ -130,7 +132,7 @@ NOTE: In order to run this example you need OpenOCD version `v0.10.0-esp32-20181
 7.  When program prints the last message, interrupt its execution (e.g. by pressing `CTRL+C`) and type the following command in GDB console to stop tracing:
 
     ```
-    mon esp sysview stop
+    mon esp32 sysview stop
     ```
 
     You can also use another breakpoint to stop tracing and add respective lines to `gdbinit`  at step 5.

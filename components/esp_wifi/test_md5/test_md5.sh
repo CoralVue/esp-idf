@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 
 set -euo pipefail
 
@@ -19,7 +19,7 @@ case $IDF_TARGET in
         ;;
     esp32s2)
         PREFIX=xtensa-esp32s2-elf-
-        LIB_DIR=esp32s2
+        LIB_DIR=esp32s2beta
         ;;
     *)
         echo "Invalid IDF_TARGET value: \"${IDF_TARGET}\""

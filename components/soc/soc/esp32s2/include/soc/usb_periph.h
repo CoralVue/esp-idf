@@ -20,7 +20,6 @@
 #include "soc/gpio_sig_map.h"
 #include "soc/usb_reg.h"
 #include "soc/usb_types.h"
-#include "soc/usb_struct.h"
 
 /**
  * @brief A pin decriptor for init

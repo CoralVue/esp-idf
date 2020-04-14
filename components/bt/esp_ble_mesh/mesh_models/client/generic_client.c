@@ -14,8 +14,19 @@
 
 #include <string.h>
 #include <errno.h>
+#include <stdbool.h>
 
+#include "osi/allocator.h"
+#include "osi/mutex.h"
+#include "sdkconfig.h"
+
+#include "mesh_types.h"
+#include "mesh_kernel.h"
+#include "mesh_trace.h"
+
+#include "mesh.h"
 #include "model_opcode.h"
+#include "mesh_common.h"
 #include "generic_client.h"
 
 #include "btc_ble_mesh_generic_model.h"
@@ -109,36 +120,32 @@ static const bt_mesh_client_op_pair_t gen_op_pair[] = {
     { BLE_MESH_MODEL_OP_GEN_CLIENT_PROPERTIES_GET, BLE_MESH_MODEL_OP_GEN_CLIENT_PROPERTIES_STATUS },
 };
 
-static bt_mesh_mutex_t generic_client_lock;
+static osi_mutex_t generic_client_mutex;
 
 static void bt_mesh_generic_client_mutex_new(void)
 {
-    if (!generic_client_lock.mutex) {
-        bt_mesh_mutex_create(&generic_client_lock);
-    }
-}
+    static bool init;
 
-static void bt_mesh_generic_client_mutex_free(void)
-{
-    bt_mesh_mutex_free(&generic_client_lock);
+    if (!init) {
+        osi_mutex_new(&generic_client_mutex);
+        init = true;
+    }
 }
 
 static void bt_mesh_generic_client_lock(void)
 {
-    bt_mesh_mutex_lock(&generic_client_lock);
+    osi_mutex_lock(&generic_client_mutex, OSI_MUTEX_MAX_TIMEOUT);
 }
 
 static void bt_mesh_generic_client_unlock(void)
 {
-    bt_mesh_mutex_unlock(&generic_client_lock);
+    osi_mutex_unlock(&generic_client_mutex);
 }
 
 static void timeout_handler(struct k_work *work)
 {
     struct k_delayed_work *timer = NULL;
     bt_mesh_client_node_t *node = NULL;
-    struct bt_mesh_msg_ctx ctx = {0};
-    u32_t opcode = 0U;
 
     BT_WARN("Receive generic status message timeout");
 
@@ -149,11 +156,10 @@ static void timeout_handler(struct k_work *work)
     if (timer && !k_delayed_work_free(timer)) {
         node = CONTAINER_OF(work, bt_mesh_client_node_t, timer.work);
         if (node) {
-            memcpy(&ctx, &node->ctx, sizeof(ctx));
-            opcode = node->opcode;
+            bt_mesh_generic_client_cb_evt_to_btc(node->opcode,
+                                                 BTC_BLE_MESH_EVT_GENERIC_CLIENT_TIMEOUT, node->ctx.model, &node->ctx, NULL, 0);
+            // Don't forget to release the node at the end.
             bt_mesh_client_free_node(node);
-            bt_mesh_generic_client_cb_evt_to_btc(
-                opcode, BTC_BLE_MESH_EVT_GENERIC_CLIENT_TIMEOUT, ctx.model, &ctx, NULL, 0);
         }
     }
 
@@ -169,7 +175,7 @@ static void generic_status(struct bt_mesh_model *model,
     bt_mesh_client_node_t *node = NULL;
     u8_t *val = NULL;
     u8_t evt = 0xFF;
-    size_t len = 0U;
+    size_t len = 0;
 
     BT_DBG("%s, len %d, bytes %s", __func__, buf->len, bt_hex(buf->data, buf->len));
 
@@ -180,7 +186,7 @@ static void generic_status(struct bt_mesh_model *model,
             BT_ERR("Invalid Generic OnOff Status length %d", buf->len);
             return;
         }
-        status = bt_mesh_calloc(sizeof(struct bt_mesh_gen_onoff_status));
+        status = osi_calloc(sizeof(struct bt_mesh_gen_onoff_status));
         if (!status) {
             BT_ERR("%s, Failed to allocate memory", __func__);
             return;
@@ -201,7 +207,7 @@ static void generic_status(struct bt_mesh_model *model,
             BT_ERR("Invalid Generic Level Status length %d", buf->len);
             return;
         }
-        status = bt_mesh_calloc(sizeof(struct bt_mesh_gen_level_status));
+        status = osi_calloc(sizeof(struct bt_mesh_gen_level_status));
         if (!status) {
             BT_ERR("%s, Failed to allocate memory", __func__);
             return;
@@ -222,7 +228,7 @@ static void generic_status(struct bt_mesh_model *model,
             BT_ERR("Invalid Generic Default Trans Time Status length %d", buf->len);
             return;
         }
-        status = bt_mesh_calloc(sizeof(struct bt_mesh_gen_def_trans_time_status));
+        status = osi_calloc(sizeof(struct bt_mesh_gen_def_trans_time_status));
         if (!status) {
             BT_ERR("%s, Failed to allocate memory", __func__);
             return;
@@ -238,7 +244,7 @@ static void generic_status(struct bt_mesh_model *model,
             BT_ERR("Invalid Generic OnPowerUp Status length %d", buf->len);
             return;
         }
-        status = bt_mesh_calloc(sizeof(struct bt_mesh_gen_onpowerup_status));
+        status = osi_calloc(sizeof(struct bt_mesh_gen_onpowerup_status));
         if (!status) {
             BT_ERR("%s, Failed to allocate memory", __func__);
             return;
@@ -254,7 +260,7 @@ static void generic_status(struct bt_mesh_model *model,
             BT_ERR("Invalid Generic Power Level Status length %d", buf->len);
             return;
         }
-        status = bt_mesh_calloc(sizeof(struct bt_mesh_gen_power_level_status));
+        status = osi_calloc(sizeof(struct bt_mesh_gen_power_level_status));
         if (!status) {
             BT_ERR("%s, Failed to allocate memory", __func__);
             return;
@@ -275,7 +281,7 @@ static void generic_status(struct bt_mesh_model *model,
             BT_ERR("Invalid Generic Power Last Status length %d", buf->len);
             return;
         }
-        status = bt_mesh_calloc(sizeof(struct bt_mesh_gen_power_last_status));
+        status = osi_calloc(sizeof(struct bt_mesh_gen_power_last_status));
         if (!status) {
             BT_ERR("%s, Failed to allocate memory", __func__);
             return;
@@ -291,7 +297,7 @@ static void generic_status(struct bt_mesh_model *model,
             BT_ERR("Invalid Generic Power Default Status length %d", buf->len);
             return;
         }
-        status = bt_mesh_calloc(sizeof(struct bt_mesh_gen_power_default_status));
+        status = osi_calloc(sizeof(struct bt_mesh_gen_power_default_status));
         if (!status) {
             BT_ERR("%s, Failed to allocate memory", __func__);
             return;
@@ -307,7 +313,7 @@ static void generic_status(struct bt_mesh_model *model,
             BT_ERR("Invalid Generic Power Range Status length %d", buf->len);
             return;
         }
-        status = bt_mesh_calloc(sizeof(struct bt_mesh_gen_power_range_status));
+        status = osi_calloc(sizeof(struct bt_mesh_gen_power_range_status));
         if (!status) {
             BT_ERR("%s, Failed to allocate memory", __func__);
             return;
@@ -325,7 +331,7 @@ static void generic_status(struct bt_mesh_model *model,
             BT_ERR("Invalid Generic Battery Status length %d", buf->len);
             return;
         }
-        status = bt_mesh_calloc(sizeof(struct bt_mesh_gen_battery_status));
+        status = osi_calloc(sizeof(struct bt_mesh_gen_battery_status));
         if (!status) {
             BT_ERR("%s, Failed to allocate memory", __func__);
             return;
@@ -347,7 +353,7 @@ static void generic_status(struct bt_mesh_model *model,
             BT_ERR("Invalid Generic Location Global Status length %d", buf->len);
             return;
         }
-        status = bt_mesh_calloc(sizeof(struct bt_mesh_gen_loc_global_status));
+        status = osi_calloc(sizeof(struct bt_mesh_gen_loc_global_status));
         if (!status) {
             BT_ERR("%s, Failed to allocate memory", __func__);
             return;
@@ -365,7 +371,7 @@ static void generic_status(struct bt_mesh_model *model,
             BT_ERR("Invalid Generic Location Local Status length %d", buf->len);
             return;
         }
-        status = bt_mesh_calloc(sizeof(struct bt_mesh_gen_loc_local_status));
+        status = osi_calloc(sizeof(struct bt_mesh_gen_loc_local_status));
         if (!status) {
             BT_ERR("%s, Failed to allocate memory", __func__);
             return;
@@ -381,7 +387,7 @@ static void generic_status(struct bt_mesh_model *model,
     }
     case BLE_MESH_MODEL_OP_GEN_USER_PROPERTIES_STATUS: {
         struct bt_mesh_gen_user_properties_status *status = NULL;
-        status = bt_mesh_calloc(sizeof(struct bt_mesh_gen_user_properties_status));
+        status = osi_calloc(sizeof(struct bt_mesh_gen_user_properties_status));
         if (!status) {
             BT_ERR("%s, Failed to allocate memory", __func__);
             return;
@@ -389,7 +395,7 @@ static void generic_status(struct bt_mesh_model *model,
         status->user_property_ids = bt_mesh_alloc_buf(buf->len);
         if (!status->user_property_ids) {
             BT_ERR("%s, Failed to allocate memory", __func__);
-            bt_mesh_free(status);
+            osi_free(status);
             return;
         }
         net_buf_simple_add_mem(status->user_property_ids, buf->data, buf->len);
@@ -399,7 +405,7 @@ static void generic_status(struct bt_mesh_model *model,
     }
     case BLE_MESH_MODEL_OP_GEN_USER_PROPERTY_STATUS: {
         struct bt_mesh_gen_user_property_status *status = NULL;
-        status = bt_mesh_calloc(sizeof(struct bt_mesh_gen_user_property_status));
+        status = osi_calloc(sizeof(struct bt_mesh_gen_user_property_status));
         if (!status) {
             BT_ERR("%s, Failed to allocate memory", __func__);
             return;
@@ -411,7 +417,7 @@ static void generic_status(struct bt_mesh_model *model,
             status->user_property_value = bt_mesh_alloc_buf(buf->len);
             if (!status->user_property_value) {
                 BT_ERR("%s, Failed to allocate memory", __func__);
-                bt_mesh_free(status);
+                osi_free(status);
                 return;
             }
             net_buf_simple_add_mem(status->user_property_value, buf->data, buf->len);
@@ -422,7 +428,7 @@ static void generic_status(struct bt_mesh_model *model,
     }
     case BLE_MESH_MODEL_OP_GEN_ADMIN_PROPERTIES_STATUS: {
         struct bt_mesh_gen_admin_properties_status *status = NULL;
-        status = bt_mesh_calloc(sizeof(struct bt_mesh_gen_admin_properties_status));
+        status = osi_calloc(sizeof(struct bt_mesh_gen_admin_properties_status));
         if (!status) {
             BT_ERR("%s, Failed to allocate memory", __func__);
             return;
@@ -430,7 +436,7 @@ static void generic_status(struct bt_mesh_model *model,
         status->admin_property_ids = bt_mesh_alloc_buf(buf->len);
         if (!status->admin_property_ids) {
             BT_ERR("%s, Failed to allocate memory", __func__);
-            bt_mesh_free(status);
+            osi_free(status);
             return;
         }
         net_buf_simple_add_mem(status->admin_property_ids, buf->data, buf->len);
@@ -440,7 +446,7 @@ static void generic_status(struct bt_mesh_model *model,
     }
     case BLE_MESH_MODEL_OP_GEN_ADMIN_PROPERTY_STATUS: {
         struct bt_mesh_gen_admin_property_status *status = NULL;
-        status = bt_mesh_calloc(sizeof(struct bt_mesh_gen_admin_property_status));
+        status = osi_calloc(sizeof(struct bt_mesh_gen_admin_property_status));
         if (!status) {
             BT_ERR("%s, Failed to allocate memory", __func__);
             return;
@@ -452,7 +458,7 @@ static void generic_status(struct bt_mesh_model *model,
             status->admin_property_value = bt_mesh_alloc_buf(buf->len);
             if (!status->admin_property_value) {
                 BT_ERR("%s, Failed to allocate memory", __func__);
-                bt_mesh_free(status);
+                osi_free(status);
                 return;
             }
             net_buf_simple_add_mem(status->admin_property_value, buf->data, buf->len);
@@ -463,7 +469,7 @@ static void generic_status(struct bt_mesh_model *model,
     }
     case BLE_MESH_MODEL_OP_GEN_MANU_PROPERTIES_STATUS: {
         struct bt_mesh_gen_manu_properties_status *status = NULL;
-        status = bt_mesh_calloc(sizeof(struct bt_mesh_gen_manu_properties_status));
+        status = osi_calloc(sizeof(struct bt_mesh_gen_manu_properties_status));
         if (!status) {
             BT_ERR("%s, Failed to allocate memory", __func__);
             return;
@@ -471,7 +477,7 @@ static void generic_status(struct bt_mesh_model *model,
         status->manu_property_ids = bt_mesh_alloc_buf(buf->len);
         if (!status->manu_property_ids) {
             BT_ERR("%s, Failed to allocate memory", __func__);
-            bt_mesh_free(status);
+            osi_free(status);
             return;
         }
         net_buf_simple_add_mem(status->manu_property_ids, buf->data, buf->len);
@@ -481,7 +487,7 @@ static void generic_status(struct bt_mesh_model *model,
     }
     case BLE_MESH_MODEL_OP_GEN_MANU_PROPERTY_STATUS: {
         struct bt_mesh_gen_manu_property_status *status = NULL;
-        status = bt_mesh_calloc(sizeof(struct bt_mesh_gen_manu_property_status));
+        status = osi_calloc(sizeof(struct bt_mesh_gen_manu_property_status));
         if (!status) {
             BT_ERR("%s, Failed to allocate memory", __func__);
             return;
@@ -493,7 +499,7 @@ static void generic_status(struct bt_mesh_model *model,
             status->manu_property_value = bt_mesh_alloc_buf(buf->len);
             if (!status->manu_property_value) {
                 BT_ERR("%s, Failed to allocate memory", __func__);
-                bt_mesh_free(status);
+                osi_free(status);
                 return;
             }
             net_buf_simple_add_mem(status->manu_property_value, buf->data, buf->len);
@@ -504,7 +510,7 @@ static void generic_status(struct bt_mesh_model *model,
     }
     case BLE_MESH_MODEL_OP_GEN_CLIENT_PROPERTIES_STATUS: {
         struct bt_mesh_gen_client_properties_status *status = NULL;
-        status = bt_mesh_calloc(sizeof(struct bt_mesh_gen_client_properties_status));
+        status = osi_calloc(sizeof(struct bt_mesh_gen_client_properties_status));
         if (!status) {
             BT_ERR("%s, Failed to allocate memory", __func__);
             return;
@@ -512,7 +518,7 @@ static void generic_status(struct bt_mesh_model *model,
         status->client_property_ids = bt_mesh_alloc_buf(buf->len);
         if (!status->client_property_ids) {
             BT_ERR("%s, Failed to allocate memory", __func__);
-            bt_mesh_free(status);
+            osi_free(status);
             return;
         }
         net_buf_simple_add_mem(status->client_property_ids, buf->data, buf->len);
@@ -576,9 +582,9 @@ static void generic_status(struct bt_mesh_model *model,
         }
 
         if (!k_delayed_work_free(&node->timer)) {
-            u32_t opcode = node->opcode;
+            bt_mesh_generic_client_cb_evt_to_btc(node->opcode, evt, model, ctx, val, len);
+            // Don't forget to release the node at the end.
             bt_mesh_client_free_node(node);
-            bt_mesh_generic_client_cb_evt_to_btc(opcode, evt, model, ctx, val, len);
         }
     }
 
@@ -631,7 +637,7 @@ static void generic_status(struct bt_mesh_model *model,
         break;
     }
 
-    bt_mesh_free(val);
+    osi_free(val);
 
     return;
 }
@@ -689,7 +695,7 @@ const struct bt_mesh_model_op gen_property_cli_op[] = {
 static int gen_get_state(bt_mesh_client_common_param_t *common, void *value)
 {
     NET_BUF_SIMPLE_DEFINE(msg, BLE_MESH_GEN_GET_STATE_MSG_LEN);
-    int err = 0;
+    int err;
 
     bt_mesh_model_msg_init(&msg, common->opcode);
 
@@ -739,7 +745,7 @@ static int gen_set_state(bt_mesh_client_common_param_t *common,
                          void *value, u16_t value_len, bool need_ack)
 {
     struct net_buf_simple *msg = NULL;
-    int err = 0;
+    int err;
 
     msg = bt_mesh_alloc_buf(value_len);
     if (!msg) {
@@ -983,8 +989,8 @@ int bt_mesh_generic_client_get_state(bt_mesh_client_common_param_t *common, void
 int bt_mesh_generic_client_set_state(bt_mesh_client_common_param_t *common, void *set, void *status)
 {
     bt_mesh_generic_client_t *client = NULL;
-    u16_t length = 0U;
-    bool need_ack = false;
+    u16_t length   = 0;
+    bool  need_ack = false;
 
     if (!common || !common->model || !set) {
         BT_ERR("%s, Invalid parameter", __func__);
@@ -1167,7 +1173,7 @@ static int generic_client_init(struct bt_mesh_model *model, bool primary)
     }
 
     if (!client->internal_data) {
-        internal = bt_mesh_calloc(sizeof(generic_internal_data_t));
+        internal = osi_calloc(sizeof(generic_internal_data_t));
         if (!internal) {
             BT_ERR("%s, Failed to allocate memory", __func__);
             return -ENOMEM;
@@ -1226,73 +1232,4 @@ int bt_mesh_gen_location_cli_init(struct bt_mesh_model *model, bool primary)
 int bt_mesh_gen_property_cli_init(struct bt_mesh_model *model, bool primary)
 {
     return generic_client_init(model, primary);
-}
-
-static int generic_client_deinit(struct bt_mesh_model *model, bool primary)
-{
-    bt_mesh_generic_client_t *client = NULL;
-
-    if (!model) {
-        BT_ERR("%s, Invalid parameter", __func__);
-        return -EINVAL;
-    }
-
-    client = (bt_mesh_generic_client_t *)model->user_data;
-    if (!client) {
-        BT_ERR("%s, Generic Client user_data is NULL", __func__);
-        return -EINVAL;
-    }
-
-    if (client->internal_data) {
-        /* Remove items from the list */
-        bt_mesh_client_clear_list(client->internal_data);
-
-        /* Free the allocated internal data */
-        bt_mesh_free(client->internal_data);
-        client->internal_data = NULL;
-    }
-
-    bt_mesh_generic_client_mutex_free();
-
-    return 0;
-}
-
-int bt_mesh_gen_onoff_cli_deinit(struct bt_mesh_model *model, bool primary)
-{
-    return generic_client_deinit(model, primary);
-}
-
-int bt_mesh_gen_level_cli_deinit(struct bt_mesh_model *model, bool primary)
-{
-    return generic_client_deinit(model, primary);
-}
-
-int bt_mesh_gen_def_trans_time_cli_deinit(struct bt_mesh_model *model, bool primary)
-{
-    return generic_client_deinit(model, primary);
-}
-
-int bt_mesh_gen_pwr_onoff_cli_deinit(struct bt_mesh_model *model, bool primary)
-{
-    return generic_client_deinit(model, primary);
-}
-
-int bt_mesh_gen_pwr_level_cli_deinit(struct bt_mesh_model *model, bool primary)
-{
-    return generic_client_deinit(model, primary);
-}
-
-int bt_mesh_gen_battery_cli_deinit(struct bt_mesh_model *model, bool primary)
-{
-    return generic_client_deinit(model, primary);
-}
-
-int bt_mesh_gen_location_cli_deinit(struct bt_mesh_model *model, bool primary)
-{
-    return generic_client_deinit(model, primary);
-}
-
-int bt_mesh_gen_property_cli_deinit(struct bt_mesh_model *model, bool primary)
-{
-    return generic_client_deinit(model, primary);
 }

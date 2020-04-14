@@ -74,8 +74,6 @@ esp_err_t bluetooth_init(void)
         return ret;
     }
 
-    esp_log_level_set("*", ESP_LOG_ERROR);
-    esp_log_level_set("ble_mesh_node_console", ESP_LOG_INFO);
     return ret;
 }
 
@@ -92,8 +90,6 @@ void app_main(void)
     }
 
     esp_console_repl_config_t repl_config = ESP_CONSOLE_REPL_CONFIG_DEFAULT();
-    const char* prompt = LOG_COLOR_I "esp32> " LOG_RESET_COLOR;
-    repl_config.prompt = prompt;
 #if CONFIG_STORE_HISTORY
     initialize_filesystem();
     repl_config.his_save_path = HISTORY_PATH;
@@ -105,9 +101,6 @@ void app_main(void)
     register_bluetooth();
     ble_mesh_register_mesh_node();
     ble_mesh_register_server();
-#if (CONFIG_BLE_MESH_GENERIC_ONOFF_CLI)
-    ble_mesh_register_gen_onoff_client();
-#endif
 
     // start console REPL
     ESP_ERROR_CHECK(esp_console_repl_start());

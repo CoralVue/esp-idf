@@ -35,18 +35,13 @@ extern "C" {
 #define ESP_ERR_CODING                            (ESP_ERR_EFUSE + 0x04)      /*!< Error while a encoding operation. */
 
 /**
- * @brief Structure eFuse field
+* @brief Structure eFuse field
  */
-struct esp_efuse_desc_s {
+typedef struct {
     esp_efuse_block_t   efuse_block: 8; /**< Block of eFuse */
     uint8_t             bit_start;      /**< Start bit [0..255] */
     uint16_t            bit_count;      /**< Length of bit field [1..-]*/
-};
-
-/**
- * @brief Type definition for an eFuse field
- */
-typedef struct esp_efuse_desc_s esp_efuse_desc_t;
+} esp_efuse_desc_t;
 
 /**
  * @brief   Reads bits from EFUSE field and writes it into an array.
