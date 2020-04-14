@@ -15,6 +15,8 @@
 #ifndef _BLE_MESH_SETTINGS_NVS_H_
 #define _BLE_MESH_SETTINGS_NVS_H_
 
+#include <stdint.h>
+#include "mesh_types.h"
 #include "mesh_buf.h"
 
 #ifdef __cplusplus
@@ -28,7 +30,6 @@ extern "C" {
 #define BLE_MESH_GET_MODEL_KEY(a, b)    ((u16_t)(((u16_t)((a) << 8)) | b))
 
 void bt_mesh_settings_foreach(void);
-void bt_mesh_settings_deforeach(void);
 
 int bt_mesh_save_core_settings(const char *key, const u8_t *val, size_t len);
 

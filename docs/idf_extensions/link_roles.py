@@ -21,14 +21,6 @@ def get_github_rev():
     return path
 
 
-def url_join(*url_parts):
-    """ Make a URL out of multiple components, assume first part is the https:// part and
-    anything else is a path component """
-    result = "/".join(url_parts)
-    result = re.sub(r"([^:])//+", r"\1/", result)  # remove any // that isn't in the https:// part
-    return result
-
-
 def setup(app):
     rev = get_github_rev()
 
@@ -44,9 +36,19 @@ def setup(app):
     app.add_role('example_raw', github_link('raw', rev, '/examples/', app.config))
 
     # link to the current documentation file in specific language version
-    app.add_role('link_to_translation', link_to_translation(app.config))
+    on_rtd = os.environ.get('READTHEDOCS', None) == 'True'
+    if on_rtd:
+        # provide RTD specific commit identification to be included in the link
+        tag_rev = 'latest'
+        if (subprocess.check_output(['git','rev-parse', '--short', 'HEAD']).decode('utf-8').strip() != rev):
+            tag_rev = rev
+    else:
+        # if not on the RTD then provide generic identification
+        tag_rev = subprocess.check_output(['git', 'describe', '--always']).decode('utf-8').strip()
 
-    return {'parallel_read_safe': True, 'parallel_write_safe': True, 'version': '0.3'}
+    app.add_role('link_to_translation', crosslink('%s../../%s/{}/%s.html'.format(tag_rev)))
+
+    return {'parallel_read_safe': True, 'parallel_write_safe': True, 'version': '0.2'}
 
 
 def github_link(link_type, rev, root_path, app_config):
@@ -72,7 +74,7 @@ def github_link(link_type, rev, root_path, app_config):
         rel_path = root_path + link
         abs_path = os.path.join(app_config.idf_path, rel_path.lstrip('/'))
         line_no = None
-        url = url_join(BASE_URL, link_type, rev, rel_path)
+        url = BASE_URL + link_type + rel_path
 
         if '#L' in abs_path:
             # drop any URL line number from the file, line numbers take the form #Lnnn or #Lnnn-Lnnn for a range
@@ -115,15 +117,13 @@ def github_link(link_type, rev, root_path, app_config):
     return role
 
 
-def link_to_translation(config):
+def crosslink(pattern):
     def role(name, rawtext, text, lineno, inliner, options={}, content=[]):
         (language, link_text) = text.split(':')
         docname = inliner.document.settings.env.docname
         doc_path = inliner.document.settings.env.doc2path(docname, None, None)
-        return_path = '../' * doc_path.count('/')  # path back to the root from 'docname'
-        # then take off 3 more paths for language/release/targetname and build the new URL
-        url = "{}.html".format(os.path.join(return_path, '../../..', language, config.release,
-                                            config.idf_target, docname))
+        return_path = '../' * doc_path.count('/')
+        url = pattern % (return_path, language, docname)
         node = nodes.reference(rawtext, link_text, refuri=url, **options)
         return [node], []
     return role

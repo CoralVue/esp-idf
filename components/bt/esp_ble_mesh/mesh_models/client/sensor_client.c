@@ -14,8 +14,19 @@
 
 #include <string.h>
 #include <errno.h>
+#include <stdbool.h>
 
+#include "osi/allocator.h"
+#include "osi/mutex.h"
+#include "sdkconfig.h"
+
+#include "mesh_types.h"
+#include "mesh_kernel.h"
+#include "mesh_trace.h"
+
+#include "mesh.h"
 #include "model_opcode.h"
+#include "mesh_common.h"
 #include "sensor_client.h"
 
 #include "btc_ble_mesh_sensor_model.h"
@@ -47,36 +58,32 @@ static const bt_mesh_client_op_pair_t sensor_op_pair[] = {
     { BLE_MESH_MODEL_OP_SENSOR_SERIES_GET,     BLE_MESH_MODEL_OP_SENSOR_SERIES_STATUS     },
 };
 
-static bt_mesh_mutex_t sensor_client_lock;
+static osi_mutex_t sensor_client_mutex;
 
 static void bt_mesh_sensor_client_mutex_new(void)
 {
-    if (!sensor_client_lock.mutex) {
-        bt_mesh_mutex_create(&sensor_client_lock);
-    }
-}
+    static bool init;
 
-static void bt_mesh_sensor_client_mutex_free(void)
-{
-    bt_mesh_mutex_free(&sensor_client_lock);
+    if (!init) {
+        osi_mutex_new(&sensor_client_mutex);
+        init = true;
+    }
 }
 
 static void bt_mesh_sensor_client_lock(void)
 {
-    bt_mesh_mutex_lock(&sensor_client_lock);
+    osi_mutex_lock(&sensor_client_mutex, OSI_MUTEX_MAX_TIMEOUT);
 }
 
 static void bt_mesh_sensor_client_unlock(void)
 {
-    bt_mesh_mutex_unlock(&sensor_client_lock);
+    osi_mutex_unlock(&sensor_client_mutex);
 }
 
 static void timeout_handler(struct k_work *work)
 {
     struct k_delayed_work *timer = NULL;
     bt_mesh_client_node_t *node = NULL;
-    struct bt_mesh_msg_ctx ctx = {0};
-    u32_t opcode = 0U;
 
     BT_WARN("Receive sensor status message timeout");
 
@@ -87,11 +94,10 @@ static void timeout_handler(struct k_work *work)
     if (timer && !k_delayed_work_free(timer)) {
         node = CONTAINER_OF(work, bt_mesh_client_node_t, timer.work);
         if (node) {
-            memcpy(&ctx, &node->ctx, sizeof(ctx));
-            opcode = node->opcode;
+            bt_mesh_sensor_client_cb_evt_to_btc(node->opcode,
+                                                BTC_BLE_MESH_EVT_SENSOR_CLIENT_TIMEOUT, node->ctx.model, &node->ctx, NULL, 0);
+            // Don't forget to release the node at the end.
             bt_mesh_client_free_node(node);
-            bt_mesh_sensor_client_cb_evt_to_btc(
-                opcode, BTC_BLE_MESH_EVT_SENSOR_CLIENT_TIMEOUT, ctx.model, &ctx, NULL, 0);
         }
     }
 
@@ -107,14 +113,14 @@ static void sensor_status(struct bt_mesh_model *model,
     bt_mesh_client_node_t *node = NULL;
     u8_t *val = NULL;
     u8_t evt = 0xFF;
-    size_t len = 0U;
+    size_t len = 0;
 
     BT_DBG("%s, len %d, bytes %s", __func__, buf->len, bt_hex(buf->data, buf->len));
 
     switch (ctx->recv_op) {
     case BLE_MESH_MODEL_OP_SENSOR_DESCRIPTOR_STATUS: {
         struct bt_mesh_sensor_descriptor_status *status = NULL;
-        status = bt_mesh_calloc(sizeof(struct bt_mesh_sensor_descriptor_status));
+        status = osi_calloc(sizeof(struct bt_mesh_sensor_descriptor_status));
         if (!status) {
             BT_ERR("%s, Failed to allocate memory", __func__);
             return;
@@ -122,7 +128,7 @@ static void sensor_status(struct bt_mesh_model *model,
         status->descriptor = bt_mesh_alloc_buf(buf->len);
         if (!status->descriptor) {
             BT_ERR("%s, Failed to allocate memory", __func__);
-            bt_mesh_free(status);
+            osi_free(status);
             return;
         }
         net_buf_simple_add_mem(status->descriptor, buf->data, buf->len);
@@ -132,7 +138,7 @@ static void sensor_status(struct bt_mesh_model *model,
     }
     case BLE_MESH_MODEL_OP_SENSOR_CADENCE_STATUS: {
         struct bt_mesh_sensor_cadence_status *status = NULL;
-        status = bt_mesh_calloc(sizeof(struct bt_mesh_sensor_cadence_status));
+        status = osi_calloc(sizeof(struct bt_mesh_sensor_cadence_status));
         if (!status) {
             BT_ERR("%s, Failed to allocate memory", __func__);
             return;
@@ -141,7 +147,7 @@ static void sensor_status(struct bt_mesh_model *model,
         status->sensor_cadence_value = bt_mesh_alloc_buf(buf->len);
         if (!status->sensor_cadence_value) {
             BT_ERR("%s, Failed to allocate memory", __func__);
-            bt_mesh_free(status);
+            osi_free(status);
             return;
         }
         net_buf_simple_add_mem(status->sensor_cadence_value, buf->data, buf->len);
@@ -151,7 +157,7 @@ static void sensor_status(struct bt_mesh_model *model,
     }
     case BLE_MESH_MODEL_OP_SENSOR_SETTINGS_STATUS: {
         struct bt_mesh_sensor_settings_status *status = NULL;
-        status = bt_mesh_calloc(sizeof(struct bt_mesh_sensor_settings_status));
+        status = osi_calloc(sizeof(struct bt_mesh_sensor_settings_status));
         if (!status) {
             BT_ERR("%s, Failed to allocate memory", __func__);
             return;
@@ -160,7 +166,7 @@ static void sensor_status(struct bt_mesh_model *model,
         status->sensor_setting_property_ids = bt_mesh_alloc_buf(buf->len);
         if (!status->sensor_setting_property_ids) {
             BT_ERR("%s, Failed to allocate memory", __func__);
-            bt_mesh_free(status);
+            osi_free(status);
             return;
         }
         net_buf_simple_add_mem(status->sensor_setting_property_ids, buf->data, buf->len);
@@ -170,7 +176,7 @@ static void sensor_status(struct bt_mesh_model *model,
     }
     case BLE_MESH_MODEL_OP_SENSOR_SETTING_STATUS: {
         struct bt_mesh_sensor_setting_status *status = NULL;
-        status = bt_mesh_calloc(sizeof(struct bt_mesh_sensor_setting_status));
+        status = osi_calloc(sizeof(struct bt_mesh_sensor_setting_status));
         if (!status) {
             BT_ERR("%s, Failed to allocate memory", __func__);
             return;
@@ -183,7 +189,7 @@ static void sensor_status(struct bt_mesh_model *model,
             status->sensor_setting_raw = bt_mesh_alloc_buf(buf->len);
             if (!status->sensor_setting_raw) {
                 BT_ERR("%s, Failed to allocate memory", __func__);
-                bt_mesh_free(status);
+                osi_free(status);
                 return;
             }
             net_buf_simple_add_mem(status->sensor_setting_raw, buf->data, buf->len);
@@ -194,7 +200,7 @@ static void sensor_status(struct bt_mesh_model *model,
     }
     case BLE_MESH_MODEL_OP_SENSOR_STATUS: {
         struct bt_mesh_sensor_status *status = NULL;
-        status = bt_mesh_calloc(sizeof(struct bt_mesh_sensor_status));
+        status = osi_calloc(sizeof(struct bt_mesh_sensor_status));
         if (!status) {
             BT_ERR("%s, Failed to allocate memory", __func__);
             return;
@@ -202,7 +208,7 @@ static void sensor_status(struct bt_mesh_model *model,
         status->marshalled_sensor_data = bt_mesh_alloc_buf(buf->len);
         if (!status->marshalled_sensor_data) {
             BT_ERR("%s, Failed to allocate memory", __func__);
-            bt_mesh_free(status);
+            osi_free(status);
             return;
         }
         net_buf_simple_add_mem(status->marshalled_sensor_data, buf->data, buf->len);
@@ -212,7 +218,7 @@ static void sensor_status(struct bt_mesh_model *model,
     }
     case BLE_MESH_MODEL_OP_SENSOR_COLUMN_STATUS: {
         struct bt_mesh_sensor_column_status *status = NULL;
-        status = bt_mesh_calloc(sizeof(struct bt_mesh_sensor_column_status));
+        status = osi_calloc(sizeof(struct bt_mesh_sensor_column_status));
         if (!status) {
             BT_ERR("%s, Failed to allocate memory", __func__);
             return;
@@ -221,7 +227,7 @@ static void sensor_status(struct bt_mesh_model *model,
         status->sensor_column_value = bt_mesh_alloc_buf(buf->len);
         if (!status->sensor_column_value) {
             BT_ERR("%s, Failed to allocate memory", __func__);
-            bt_mesh_free(status);
+            osi_free(status);
             return;
         }
         net_buf_simple_add_mem(status->sensor_column_value, buf->data, buf->len);
@@ -231,7 +237,7 @@ static void sensor_status(struct bt_mesh_model *model,
     }
     case BLE_MESH_MODEL_OP_SENSOR_SERIES_STATUS: {
         struct bt_mesh_sensor_series_status *status = NULL;
-        status = bt_mesh_calloc(sizeof(struct bt_mesh_sensor_series_status));
+        status = osi_calloc(sizeof(struct bt_mesh_sensor_series_status));
         if (!status) {
             BT_ERR("%s, Failed to allocate memory", __func__);
             return;
@@ -240,7 +246,7 @@ static void sensor_status(struct bt_mesh_model *model,
         status->sensor_series_value = bt_mesh_alloc_buf(buf->len);
         if (!status->sensor_series_value) {
             BT_ERR("%s, Failed to allocate memory", __func__);
-            bt_mesh_free(status);
+            osi_free(status);
             return;
         }
         net_buf_simple_add_mem(status->sensor_series_value, buf->data, buf->len);
@@ -281,9 +287,9 @@ static void sensor_status(struct bt_mesh_model *model,
         }
 
         if (!k_delayed_work_free(&node->timer)) {
-            u32_t opcode = node->opcode;
+            bt_mesh_sensor_client_cb_evt_to_btc(node->opcode, evt, model, ctx, val, len);
+            // Don't forget to release the node at the end.
             bt_mesh_client_free_node(node);
-            bt_mesh_sensor_client_cb_evt_to_btc(opcode, evt, model, ctx, val, len);
         }
     }
 
@@ -336,7 +342,7 @@ static void sensor_status(struct bt_mesh_model *model,
         break;
     }
 
-    bt_mesh_free(val);
+    osi_free(val);
 
     return;
 }
@@ -356,7 +362,7 @@ static int sensor_act_state(bt_mesh_client_common_param_t *common,
                             void *value, u16_t value_len, bool need_ack)
 {
     struct net_buf_simple *msg = NULL;
-    int err = 0;
+    int err;
 
     msg = bt_mesh_alloc_buf(value_len);
     if (!msg) {
@@ -463,7 +469,7 @@ end:
 int bt_mesh_sensor_client_get_state(bt_mesh_client_common_param_t *common, void *get, void *status)
 {
     bt_mesh_sensor_client_t *client = NULL;
-    u16_t length = 0U;
+    u16_t length = 0;
 
     if (!common || !common->model || !get) {
         BT_ERR("%s, Invalid parameter", __func__);
@@ -528,7 +534,7 @@ int bt_mesh_sensor_client_get_state(bt_mesh_client_common_param_t *common, void 
 int bt_mesh_sensor_client_set_state(bt_mesh_client_common_param_t *common, void *set, void *status)
 {
     bt_mesh_sensor_client_t *client = NULL;
-    u16_t length = 0U;
+    u16_t length = 0;
     bool need_ack = false;
 
     if (!common || !common->model || !set) {
@@ -599,7 +605,7 @@ int bt_mesh_sensor_cli_init(struct bt_mesh_model *model, bool primary)
     }
 
     if (!client->internal_data) {
-        internal = bt_mesh_calloc(sizeof(sensor_internal_data_t));
+        internal = osi_calloc(sizeof(sensor_internal_data_t));
         if (!internal) {
             BT_ERR("%s, Failed to allocate memory", __func__);
             return -ENOMEM;
@@ -616,35 +622,6 @@ int bt_mesh_sensor_cli_init(struct bt_mesh_model *model, bool primary)
     }
 
     bt_mesh_sensor_client_mutex_new();
-
-    return 0;
-}
-
-int bt_mesh_sensor_cli_deinit(struct bt_mesh_model *model, bool primary)
-{
-    bt_mesh_sensor_client_t *client = NULL;
-
-    if (!model) {
-        BT_ERR("%s, Invalid parameter", __func__);
-        return -EINVAL;
-    }
-
-    client = (bt_mesh_sensor_client_t *)model->user_data;
-    if (!client) {
-        BT_ERR("%s, Sensor Client user_data is NULL", __func__);
-        return -EINVAL;
-    }
-
-    if (client->internal_data) {
-        /* Remove items from the list */
-        bt_mesh_client_clear_list(client->internal_data);
-
-        /* Free the allocated internal data */
-        bt_mesh_free(client->internal_data);
-        client->internal_data = NULL;
-    }
-
-    bt_mesh_sensor_client_mutex_free();
 
     return 0;
 }

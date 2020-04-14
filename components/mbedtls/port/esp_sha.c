@@ -26,6 +26,7 @@
 #include <mbedtls/sha512.h>
 
 
+#if CONFIG_IDF_TARGET_ESP32
 void esp_sha(esp_sha_type sha_type, const unsigned char *input, size_t ilen, unsigned char *output)
 {
     int ret;
@@ -82,3 +83,4 @@ void esp_sha(esp_sha_type sha_type, const unsigned char *input, size_t ilen, uns
     }
 
 }
+#endif

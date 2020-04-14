@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 #
 # Build test apps
 #
@@ -51,8 +51,9 @@ BUILD_PATH=$(realpath --relative-to ${IDF_PATH} ${BUILD_PATH})
 
 ALL_BUILD_LIST_JSON="${BUILD_PATH}/list.json"
 JOB_BUILD_LIST_JSON="${BUILD_PATH}/list_job_${CI_NODE_INDEX}.json"
+mkdir -p "${BUILD_PATH}/example_builds"
 
-echo "build_test_apps running for target $IDF_TARGET"
+echo "build_examples running for target $IDF_TARGET"
 
 cd ${IDF_PATH}
 
@@ -69,7 +70,7 @@ ${IDF_PATH}/tools/find_apps.py tools/test_apps \
     --recursive \
     --work-dir "${BUILD_PATH}/@f/@w/@t" \
     --build-dir build \
-    --build-log "${LOG_PATH}/@f_@w.txt" \
+    --build-log "${LOG_PATH}/@f.txt" \
     --output ${ALL_BUILD_LIST_JSON} \
     --config 'sdkconfig.ci=default' \
     --config 'sdkconfig.ci.*=' \

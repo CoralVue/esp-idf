@@ -6,38 +6,44 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <string.h>
+#include <stdbool.h>
 #include <errno.h>
 
+#include "osi/mutex.h"
+
+#include "mesh_types.h"
+#include "mesh_kernel.h"
+#include "mesh_trace.h"
+#include "mesh.h"
 #include "access.h"
-#include "transport.h"
 #include "model_opcode.h"
+
+#include "server_common.h"
+#include "state_binding.h"
 #include "state_transition.h"
 #include "device_property.h"
 
 #include "btc_ble_mesh_lighting_model.h"
 
-static bt_mesh_mutex_t light_server_lock;
+static osi_mutex_t light_server_mutex;
 
 static void bt_mesh_light_server_mutex_new(void)
 {
-    if (!light_server_lock.mutex) {
-        bt_mesh_mutex_create(&light_server_lock);
+    if (!light_server_mutex) {
+        osi_mutex_new(&light_server_mutex);
+        __ASSERT(light_server_mutex, "%s, fail", __func__);
     }
-}
-
-static void bt_mesh_light_server_mutex_free(void)
-{
-    bt_mesh_mutex_free(&light_server_lock);
 }
 
 void bt_mesh_light_server_lock(void)
 {
-    bt_mesh_mutex_lock(&light_server_lock);
+    osi_mutex_lock(&light_server_mutex, OSI_MUTEX_MAX_TIMEOUT);
 }
 
 void bt_mesh_light_server_unlock(void)
 {
-    bt_mesh_mutex_unlock(&light_server_lock);
+    osi_mutex_unlock(&light_server_mutex);
 }
 
 /* message handlers (Start) */
@@ -140,7 +146,7 @@ static void light_lightness_get(struct bt_mesh_model *model,
                                 struct net_buf_simple *buf)
 {
     struct bt_mesh_light_lightness_srv *srv = model->user_data;
-    u16_t opcode = 0U;
+    u16_t opcode;
 
     if (srv == NULL || srv->state == NULL) {
         BT_ERR("%s, Invalid model user_data", __func__);
@@ -217,10 +223,10 @@ static void light_lightness_set(struct bt_mesh_model *model,
                                 struct net_buf_simple *buf)
 {
     struct bt_mesh_light_lightness_srv *srv = model->user_data;
-    u8_t tid = 0U, trans_time = 0U, delay = 0U;
-    bool optional = false;
-    u16_t actual = 0U;
-    s64_t now = 0;
+    u8_t tid, trans_time, delay;
+    bool optional;
+    u16_t actual;
+    s64_t now;
 
     if (srv == NULL || srv->state == NULL) {
         BT_ERR("%s, Invalid model user_data", __func__);
@@ -329,10 +335,10 @@ static void light_lightness_linear_set(struct bt_mesh_model *model,
                                        struct net_buf_simple *buf)
 {
     struct bt_mesh_light_lightness_srv *srv = model->user_data;
-    u8_t tid = 0U, trans_time = 0U, delay = 0U;
-    bool optional = false;
-    u16_t linear = 0U;
-    s64_t now = 0;
+    u8_t tid, trans_time, delay;
+    bool optional;
+    u16_t linear;
+    s64_t now;
 
     if (srv == NULL || srv->state == NULL) {
         BT_ERR("%s, Invalid model user_data", __func__);
@@ -425,7 +431,7 @@ static void light_lightness_default_set(struct bt_mesh_model *model,
                                         struct net_buf_simple *buf)
 {
     struct bt_mesh_light_lightness_setup_srv *srv = model->user_data;
-    u16_t lightness = 0U;
+    u16_t lightness;
 
     if (srv == NULL || srv->state == NULL) {
         BT_ERR("%s, Invalid model user_data", __func__);
@@ -467,7 +473,7 @@ static void light_lightness_range_set(struct bt_mesh_model *model,
                                       struct net_buf_simple *buf)
 {
     struct bt_mesh_light_lightness_setup_srv *srv = model->user_data;
-    u16_t range_min = 0U, range_max = 0U;
+    u16_t range_min, range_max;
 
     if (srv == NULL || srv->state == NULL) {
         BT_ERR("%s, Invalid model user_data", __func__);
@@ -641,7 +647,7 @@ static void light_ctl_get(struct bt_mesh_model *model,
                           struct net_buf_simple *buf)
 {
     struct bt_mesh_server_rsp_ctrl *rsp_ctrl = NULL;
-    u16_t opcode = 0U;
+    u16_t opcode;
 
     if (model->user_data == NULL) {
         BT_ERR("%s, Invalid model user_data", __func__);
@@ -747,11 +753,11 @@ static void light_ctl_set(struct bt_mesh_model *model,
                           struct net_buf_simple *buf)
 {
     struct bt_mesh_light_ctl_srv *srv = model->user_data;
-    u16_t lightness = 0U, temperature = 0U;
-    u8_t tid = 0U, trans_time = 0U, delay = 0U;
-    s16_t delta_uv = 0;
-    bool optional = false;
-    s64_t now = 0;
+    u16_t lightness, temperature;
+    u8_t tid, trans_time, delay;
+    s16_t delta_uv;
+    bool optional;
+    s64_t now;
 
     if (srv == NULL || srv->state == NULL) {
         BT_ERR("%s, Invalid model user_data", __func__);
@@ -866,8 +872,8 @@ static void light_ctl_default_set(struct bt_mesh_model *model,
                                   struct net_buf_simple *buf)
 {
     struct bt_mesh_light_ctl_setup_srv *srv = model->user_data;
-    u16_t lightness = 0U, temperature = 0U;
-    s16_t delta_uv = 0;
+    u16_t lightness, temperature;
+    s16_t delta_uv;
 
     if (srv == NULL || srv->state == NULL) {
         BT_ERR("%s, Invalid model user_data", __func__);
@@ -930,7 +936,7 @@ static void light_ctl_temp_range_set(struct bt_mesh_model *model,
                                      struct net_buf_simple *buf)
 {
     struct bt_mesh_light_ctl_setup_srv *srv = model->user_data;
-    u16_t min = 0U, max = 0U;
+    u16_t min, max;
 
     if (srv == NULL || srv->state == NULL) {
         BT_ERR("%s, Invalid model user_data", __func__);
@@ -996,11 +1002,11 @@ static void light_ctl_temp_set(struct bt_mesh_model *model,
                                struct net_buf_simple *buf)
 {
     struct bt_mesh_light_ctl_temp_srv *srv = model->user_data;
-    u8_t tid = 0U, trans_time = 0U, delay = 0U;
-    u16_t temperature = 0U;
-    s16_t delta_uv = 0;
-    bool optional = false;
-    s64_t now = 0;
+    u8_t tid, trans_time, delay;
+    u16_t temperature;
+    s16_t delta_uv;
+    bool optional;
+    s64_t now;
 
     if (srv == NULL || srv->state == NULL) {
         BT_ERR("%s, Invalid model user_data", __func__);
@@ -1227,7 +1233,7 @@ static void light_hsl_get(struct bt_mesh_model *model,
                           struct net_buf_simple *buf)
 {
     struct bt_mesh_server_rsp_ctrl *rsp_ctrl = NULL;
-    u16_t opcode = 0U;
+    u16_t opcode;
 
     if (model->user_data == NULL) {
         BT_ERR("%s, Invalid model user_data", __func__);
@@ -1356,10 +1362,10 @@ static void light_hsl_set(struct bt_mesh_model *model,
                           struct net_buf_simple *buf)
 {
     struct bt_mesh_light_hsl_srv *srv = model->user_data;
-    u16_t lightness = 0U, hue = 0U, saturation = 0U;
-    u8_t tid = 0U, trans_time = 0U, delay = 0U;
-    bool optional = false;
-    s64_t now = 0;
+    u16_t lightness, hue, saturation;
+    u8_t tid, trans_time, delay;
+    bool optional;
+    s64_t now;
 
     if (srv == NULL || srv->state == NULL) {
         BT_ERR("%s, Invalid model user_data", __func__);
@@ -1474,7 +1480,7 @@ static void light_hsl_default_set(struct bt_mesh_model *model,
                                   struct net_buf_simple *buf)
 {
     struct bt_mesh_light_hsl_setup_srv *srv = model->user_data;
-    u16_t lightness = 0U, hue = 0U, saturation = 0U;
+    u16_t lightness, hue, saturation;
 
     if (srv == NULL || srv->state == NULL) {
         BT_ERR("%s, Invalid model user_data", __func__);
@@ -1534,7 +1540,7 @@ static void light_hsl_range_set(struct bt_mesh_model *model,
                                 struct net_buf_simple *buf)
 {
     struct bt_mesh_light_hsl_setup_srv *srv = model->user_data;
-    u16_t hue_min = 0U, hue_max = 0U, saturation_min = 0U, saturation_max = 0U;
+    u16_t hue_min, hue_max, saturation_min, saturation_max;
 
     if (srv == NULL || srv->state == NULL) {
         BT_ERR("%s, Invalid model user_data", __func__);
@@ -1599,10 +1605,10 @@ static void light_hsl_hue_set(struct bt_mesh_model *model,
                               struct net_buf_simple *buf)
 {
     struct bt_mesh_light_hsl_hue_srv *srv = model->user_data;
-    u8_t tid = 0U, trans_time = 0U, delay = 0U;
-    bool optional = false;
-    u16_t hue = 0U;
-    s64_t now = 0;
+    u8_t tid, trans_time, delay;
+    bool optional;
+    u16_t hue;
+    s64_t now;
 
     if (srv == NULL || srv->state == NULL) {
         BT_ERR("%s, Invalid model user_data", __func__);
@@ -1700,10 +1706,10 @@ static void light_hsl_sat_set(struct bt_mesh_model *model,
                               struct net_buf_simple *buf)
 {
     struct bt_mesh_light_hsl_sat_srv *srv = model->user_data;
-    u8_t tid = 0U, trans_time = 0U, delay = 0U;
-    u16_t saturation = 0U;
-    bool optional = false;
-    s64_t now = 0;
+    u8_t tid, trans_time, delay;
+    u16_t saturation;
+    bool optional;
+    s64_t now;
 
     if (srv == NULL || srv->state == NULL) {
         BT_ERR("%s, Invalid model user_data", __func__);
@@ -1899,7 +1905,7 @@ static void light_xyl_get(struct bt_mesh_model *model,
                           struct net_buf_simple *buf)
 {
     struct bt_mesh_light_xyl_srv *srv = model->user_data;
-    u16_t opcode = 0U;
+    u16_t opcode;
 
     if (srv == NULL || srv->state == NULL) {
         BT_ERR("%s, Invalid model user_data", __func__);
@@ -1973,10 +1979,10 @@ static void light_xyl_set(struct bt_mesh_model *model,
                           struct net_buf_simple *buf)
 {
     struct bt_mesh_light_xyl_srv *srv = model->user_data;
-    u8_t tid = 0U, trans_time = 0U, delay = 0U;
-    u16_t lightness = 0U, x = 0U, y = 0U;
-    bool optional = false;
-    s64_t now = 0;
+    u8_t tid, trans_time, delay;
+    u16_t lightness, x, y;
+    bool optional;
+    s64_t now;
 
     if (srv == NULL || srv->state == NULL) {
         BT_ERR("%s, Invalid model user_data", __func__);
@@ -2091,7 +2097,7 @@ static void light_xyl_default_set(struct bt_mesh_model *model,
                                   struct net_buf_simple *buf)
 {
     struct bt_mesh_light_xyl_setup_srv *srv = model->user_data;
-    u16_t lightness = 0U, x = 0U, y = 0U;
+    u16_t lightness, x, y;
 
     if (srv == NULL || srv->state == NULL) {
         BT_ERR("%s, Invalid model user_data", __func__);
@@ -2151,7 +2157,7 @@ static void light_xyl_range_set(struct bt_mesh_model *model,
                                 struct net_buf_simple *buf)
 {
     struct bt_mesh_light_xyl_setup_srv *srv = model->user_data;
-    u16_t x_min = 0U, x_max = 0U, y_min = 0U, y_max = 0U;
+    u16_t x_min, x_max, y_min, y_max;
 
     if (srv == NULL || srv->state == NULL) {
         BT_ERR("%s, Invalid model user_data", __func__);
@@ -2276,7 +2282,7 @@ static void light_lc_get(struct bt_mesh_model *model,
                          struct net_buf_simple *buf)
 {
     struct bt_mesh_light_lc_srv *srv = model->user_data;
-    u16_t opcode = 0U;
+    u16_t opcode;
 
     if (srv == NULL || srv->lc == NULL) {
         BT_ERR("%s, Invalid model user_data", __func__);
@@ -2327,7 +2333,7 @@ static void light_lc_mode_set(struct bt_mesh_model *model,
                               struct net_buf_simple *buf)
 {
     struct bt_mesh_light_lc_srv *srv = model->user_data;
-    u8_t mode = 0U;
+    u8_t mode;
 
     if (srv == NULL || srv->lc == NULL) {
         BT_ERR("%s, Invalid model user_data", __func__);
@@ -2371,7 +2377,7 @@ static void light_lc_om_set(struct bt_mesh_model *model,
                             struct net_buf_simple *buf)
 {
     struct bt_mesh_light_lc_srv *srv = model->user_data;
-    u8_t om = 0U;
+    u8_t om;
 
     if (srv == NULL || srv->lc == NULL) {
         BT_ERR("%s, Invalid model user_data", __func__);
@@ -2415,10 +2421,10 @@ static void light_lc_light_onoff_set(struct bt_mesh_model *model,
                                      struct net_buf_simple *buf)
 {
     struct bt_mesh_light_lc_srv *srv = model->user_data;
-    u8_t tid = 0U, trans_time = 0U, delay = 0U;
-    bool optional = false;
-    u8_t onoff = 0U;
-    s64_t now = 0;
+    u8_t tid, trans_time, delay;
+    bool optional;
+    u8_t onoff;
+    s64_t now;
 
     if (srv == NULL || srv->lc == NULL) {
         BT_ERR("%s, Invalid model user_data", __func__);
@@ -2533,8 +2539,8 @@ static void light_lc_sensor_status(struct bt_mesh_model *model,
      */
     struct bt_mesh_light_lc_srv *srv = model->user_data;
     bt_mesh_light_server_state_change_t change = {0};
-    u16_t mpid = 0U, prop_id = 0U;
-    u8_t length = 0U;
+    u16_t mpid, prop_id;
+    u8_t length;
 
     if (srv == NULL || srv->lc == NULL) {
         BT_ERR("%s, Invalid model user_data", __func__);
@@ -2730,7 +2736,7 @@ static void send_light_lc_prop_status(struct bt_mesh_model *model,
 {
     struct net_buf_simple *msg = NULL;
     u8_t length = 1 + 2 + 4;
-    u8_t *prop_val = NULL;
+    u8_t *prop_val;
 
     prop_val = get_light_lc_prop_val(model, prop_id);
     if (prop_val == NULL) {
@@ -2769,7 +2775,7 @@ static void light_lc_prop_get(struct bt_mesh_model *model,
                               struct net_buf_simple *buf)
 {
     struct bt_mesh_light_lc_setup_srv *srv = model->user_data;
-    u16_t prop_id = 0U;
+    u16_t prop_id;
 
     if (srv == NULL || srv->lc == NULL) {
         BT_ERR("%s, Invalid model user_data", __func__);
@@ -2801,8 +2807,8 @@ static void light_lc_prop_set(struct bt_mesh_model *model,
                               struct net_buf_simple *buf)
 {
     struct bt_mesh_light_lc_setup_srv *srv = model->user_data;
-    u8_t *prop_val = NULL, expect_len = 0U;
-    u16_t prop_id = 0U;
+    u8_t *prop_val, expect_len;
+    u16_t prop_id;
 
     if (srv == NULL || srv->lc == NULL) {
         BT_ERR("%s, Invalid model user_data", __func__);
@@ -3324,230 +3330,4 @@ int bt_mesh_light_lc_setup_srv_init(struct bt_mesh_model *model, bool primary)
         /* Just give a warning here, continue with the initialization */
     }
     return light_server_init(model);
-}
-
-static int light_server_deinit(struct bt_mesh_model *model)
-{
-    if (model->user_data == NULL) {
-        BT_ERR("%s, No Light Server context provided, model_id 0x%04x", __func__, model->id);
-        return -EINVAL;
-    }
-
-    switch (model->id) {
-    case BLE_MESH_MODEL_ID_LIGHT_LIGHTNESS_SRV: {
-        struct bt_mesh_light_lightness_srv *srv = model->user_data;
-        if (srv->state == NULL) {
-            BT_ERR("%s, NULL Light Lightness State", __func__);
-            return -EINVAL;
-        }
-        if (srv->rsp_ctrl.set_auto_rsp == BLE_MESH_SERVER_AUTO_RSP) {
-            bt_mesh_server_free_ctx(&srv->actual_transition.timer.work);
-            bt_mesh_server_free_ctx(&srv->linear_transition.timer.work);
-            k_delayed_work_free(&srv->actual_transition.timer);
-            k_delayed_work_free(&srv->linear_transition.timer);
-        }
-        break;
-    }
-    case BLE_MESH_MODEL_ID_LIGHT_CTL_SRV: {
-        struct bt_mesh_light_ctl_srv *srv = model->user_data;
-        if (srv->state == NULL) {
-            BT_ERR("%s, NULL Light CTL State", __func__);
-            return -EINVAL;
-        }
-        if (srv->rsp_ctrl.set_auto_rsp == BLE_MESH_SERVER_AUTO_RSP) {
-            bt_mesh_server_free_ctx(&srv->transition.timer.work);
-            k_delayed_work_free(&srv->transition.timer);
-        }
-        break;
-    }
-    case BLE_MESH_MODEL_ID_LIGHT_CTL_TEMP_SRV: {
-        struct bt_mesh_light_ctl_temp_srv *srv = model->user_data;
-        if (srv->state == NULL) {
-            BT_ERR("%s, NULL Light CTL State", __func__);
-            return -EINVAL;
-        }
-        if (srv->rsp_ctrl.set_auto_rsp == BLE_MESH_SERVER_AUTO_RSP) {
-            bt_mesh_server_free_ctx(&srv->transition.timer.work);
-            k_delayed_work_free(&srv->transition.timer);
-        }
-        break;
-    }
-    case BLE_MESH_MODEL_ID_LIGHT_HSL_SRV: {
-        struct bt_mesh_light_hsl_srv *srv = model->user_data;
-        if (srv->state == NULL) {
-            BT_ERR("%s, NULL Light HSL State", __func__);
-            return -EINVAL;
-        }
-        if (srv->rsp_ctrl.set_auto_rsp == BLE_MESH_SERVER_AUTO_RSP) {
-            bt_mesh_server_free_ctx(&srv->transition.timer.work);
-            k_delayed_work_free(&srv->transition.timer);
-        }
-        break;
-    }
-    case BLE_MESH_MODEL_ID_LIGHT_HSL_HUE_SRV: {
-        struct bt_mesh_light_hsl_hue_srv *srv = model->user_data;
-        if (srv->state == NULL) {
-            BT_ERR("%s, NULL Light HSL State", __func__);
-            return -EINVAL;
-        }
-        if (srv->rsp_ctrl.set_auto_rsp == BLE_MESH_SERVER_AUTO_RSP) {
-            bt_mesh_server_free_ctx(&srv->transition.timer.work);
-            k_delayed_work_free(&srv->transition.timer);
-        }
-        break;
-    }
-    case BLE_MESH_MODEL_ID_LIGHT_HSL_SAT_SRV: {
-        struct bt_mesh_light_hsl_sat_srv *srv = model->user_data;
-        if (srv->state == NULL) {
-            BT_ERR("%s, NULL Light HSL State", __func__);
-            return -EINVAL;
-        }
-        if (srv->rsp_ctrl.set_auto_rsp == BLE_MESH_SERVER_AUTO_RSP) {
-            bt_mesh_server_free_ctx(&srv->transition.timer.work);
-            k_delayed_work_free(&srv->transition.timer);
-        }
-        break;
-    }
-    case BLE_MESH_MODEL_ID_LIGHT_XYL_SRV: {
-        struct bt_mesh_light_xyl_srv *srv = model->user_data;
-        if (srv->state == NULL) {
-            BT_ERR("%s, NULL Light xyL State", __func__);
-            return -EINVAL;
-        }
-        if (srv->rsp_ctrl.set_auto_rsp == BLE_MESH_SERVER_AUTO_RSP) {
-            bt_mesh_server_free_ctx(&srv->transition.timer.work);
-            k_delayed_work_free(&srv->transition.timer);
-        }
-        break;
-    }
-    case BLE_MESH_MODEL_ID_LIGHT_LC_SRV: {
-        struct bt_mesh_light_lc_srv *srv = model->user_data;
-        if (srv->lc == NULL) {
-            BT_ERR("%s, NULL Light LC State", __func__);
-            return -EINVAL;
-        }
-        if (srv->rsp_ctrl.set_auto_rsp == BLE_MESH_SERVER_AUTO_RSP) {
-            bt_mesh_server_free_ctx(&srv->transition.timer.work);
-            k_delayed_work_free(&srv->transition.timer);
-        }
-        break;
-    }
-    default:
-        BT_WARN("%s, Unknown Light Server Model, model_id 0x%04x", __func__, model->id);
-        return -EINVAL;
-    }
-
-    bt_mesh_light_server_mutex_free();
-
-    return 0;
-}
-
-int bt_mesh_light_lightness_srv_deinit(struct bt_mesh_model *model, bool primary)
-{
-    if (model->pub == NULL) {
-        BT_ERR("%s, Light Lightness Server has no publication support", __func__);
-        return -EINVAL;
-    }
-
-    return light_server_deinit(model);
-}
-
-int bt_mesh_light_lightness_setup_srv_deinit(struct bt_mesh_model *model, bool primary)
-{
-    return light_server_deinit(model);
-}
-
-int bt_mesh_light_ctl_srv_deinit(struct bt_mesh_model *model, bool primary)
-{
-    if (model->pub == NULL) {
-        BT_ERR("%s, Light CTL Server has no publication support", __func__);
-        return -EINVAL;
-    }
-
-    return light_server_deinit(model);
-}
-
-int bt_mesh_light_ctl_setup_srv_deinit(struct bt_mesh_model *model, bool primary)
-{
-    return light_server_deinit(model);
-}
-
-int bt_mesh_light_ctl_temp_srv_deinit(struct bt_mesh_model *model, bool primary)
-{
-    if (model->pub == NULL) {
-        BT_ERR("%s, Light CTL Temperature Server has no publication support", __func__);
-        return -EINVAL;
-    }
-
-    return light_server_deinit(model);
-}
-
-int bt_mesh_light_hsl_srv_deinit(struct bt_mesh_model *model, bool primary)
-{
-    if (model->pub == NULL) {
-        BT_ERR("%s, Light HSL Server has no publication support", __func__);
-        return -EINVAL;
-    }
-
-    return light_server_deinit(model);
-}
-
-int bt_mesh_light_hsl_setup_srv_deinit(struct bt_mesh_model *model, bool primary)
-{
-    return light_server_deinit(model);
-}
-
-int bt_mesh_light_hsl_hue_srv_deinit(struct bt_mesh_model *model, bool primary)
-{
-    if (model->pub == NULL) {
-        BT_ERR("%s, Light HSL Hue Server has no publication support", __func__);
-        return -EINVAL;
-    }
-
-    return light_server_deinit(model);
-}
-
-int bt_mesh_light_hsl_sat_srv_deinit(struct bt_mesh_model *model, bool primary)
-{
-    if (model->pub == NULL) {
-        BT_ERR("%s, Light HSL Saturation Server has no publication support", __func__);
-        return -EINVAL;
-    }
-
-    return light_server_deinit(model);
-}
-
-int bt_mesh_light_xyl_srv_deinit(struct bt_mesh_model *model, bool primary)
-{
-    if (model->pub == NULL) {
-        BT_ERR("%s, Light xyL Server has no publication support", __func__);
-        return -EINVAL;
-    }
-
-    return light_server_deinit(model);
-}
-
-int bt_mesh_light_xyl_setup_srv_deinit(struct bt_mesh_model *model, bool primary)
-{
-    return light_server_deinit(model);
-}
-
-int bt_mesh_light_lc_srv_deinit(struct bt_mesh_model *model, bool primary)
-{
-    if (model->pub == NULL) {
-        BT_ERR("%s, Light LC Server has no publication support", __func__);
-        return -EINVAL;
-    }
-
-    return light_server_deinit(model);
-}
-
-int bt_mesh_light_lc_setup_srv_deinit(struct bt_mesh_model *model, bool primary)
-{
-    if (model->pub == NULL) {
-        BT_ERR("%s, Light LC Setup Server has no publication support", __func__);
-        return -EINVAL;
-    }
-
-    return light_server_deinit(model);
 }

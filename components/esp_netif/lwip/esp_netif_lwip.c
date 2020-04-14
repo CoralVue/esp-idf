@@ -47,10 +47,8 @@
 #define ESP_NETIF_HOSTNAME_MAX_SIZE    32
 
 /**
- * @brief lwip thread safe tcpip function utility macros
+ * @brief lwip thread safe tcpip function utility macro
  */
-#define _RUN_IN_LWIP_TASK(function, netif, param) { return esp_netif_lwip_ipc_call(function, netif, (void *)(param)); }
-
 #define _RUN_IN_LWIP_TASK_IF_SUPPORTED(function, netif, param) \
 {                                                              \
     if (netif->is_ppp_netif) {                                 \
@@ -142,8 +140,6 @@ static esp_netif_t* esp_netif_is_active(esp_netif_t *arg)
  * @brief This function sets default netif no matter which implementation used
  *
  * @param esp_netif handle to network interface
- *
- * @note: This function must be called from lwip thread
  */
 static void esp_netif_set_default_netif(esp_netif_t *esp_netif)
 {
@@ -155,17 +151,14 @@ static void esp_netif_set_default_netif(esp_netif_t *esp_netif)
 }
 
 /**
- * @brief tcpip thread version of esp_netif_update_default_netif
+ * @brief This function sets default routing netif based on priorities of all interfaces which are up
+ * @param esp_netif current interface which just updated state
+ * @param action updating action (on-off)
  *
- * @note This function and all functions called from this must be called from lwip task context
+ * @note: This function must be called from lwip thread
+ *
  */
-static esp_err_t esp_netif_update_default_netif_lwip(esp_netif_api_msg_t *msg)
-{
-    esp_netif_t *esp_netif = msg->esp_netif;
-    esp_netif_action_t action = (esp_netif_action_t)msg->data;
-
-    ESP_LOGD(TAG, "%s %p", __func__, esp_netif);
-
+static void esp_netif_update_default_netif(esp_netif_t *esp_netif, esp_netif_action_t action) {
     switch (action) {
         case ESP_NETIF_STARTED:
         {
@@ -207,18 +200,6 @@ static esp_err_t esp_netif_update_default_netif_lwip(esp_netif_api_msg_t *msg)
         }
         break;
     }
-    return ESP_OK;
-}
-
-/**
- * @brief This function sets default routing netif based on priorities of all interfaces which are up
- *
- * @param esp_netif current interface which just updated state
- * @param action updating action (on-off)
- */
-static esp_err_t esp_netif_update_default_netif(esp_netif_t *esp_netif, esp_netif_action_t action)
-{
-    return esp_netif_lwip_ipc_call(esp_netif_update_default_netif_lwip, esp_netif, (void*)action);
 }
 
 void esp_netif_set_ip4_addr(esp_ip4_addr_t *addr, uint8_t a, uint8_t b, uint8_t c, uint8_t d)
@@ -1099,7 +1080,7 @@ static esp_err_t esp_netif_up_api(esp_netif_api_msg_t *msg)
     return ESP_OK;
 }
 
-esp_err_t esp_netif_up(esp_netif_t *esp_netif) _RUN_IN_LWIP_TASK(esp_netif_up_api, esp_netif, NULL)
+esp_err_t esp_netif_up(esp_netif_t *esp_netif) _RUN_IN_LWIP_TASK_IF_SUPPORTED(esp_netif_up_api, esp_netif, NULL)
 
 static esp_err_t esp_netif_down_api(esp_netif_api_msg_t *msg)
 {
@@ -1120,9 +1101,7 @@ static esp_err_t esp_netif_down_api(esp_netif_api_msg_t *msg)
 
         esp_netif_reset_ip_info(esp_netif);
     }
-    for(int8_t i = 0 ;i < LWIP_IPV6_NUM_ADDRESSES ;i++) {
-        netif_ip6_addr_set(lwip_netif, i, IP6_ADDR_ANY6);
-    }
+
     netif_set_addr(lwip_netif, IP4_ADDR_ANY4, IP4_ADDR_ANY4, IP4_ADDR_ANY4);
     netif_set_down(lwip_netif);
 
@@ -1135,7 +1114,7 @@ static esp_err_t esp_netif_down_api(esp_netif_api_msg_t *msg)
     return ESP_OK;
 }
 
-esp_err_t esp_netif_down(esp_netif_t *esp_netif) _RUN_IN_LWIP_TASK(esp_netif_down_api, esp_netif, NULL)
+esp_err_t esp_netif_down(esp_netif_t *esp_netif) _RUN_IN_LWIP_TASK_IF_SUPPORTED(esp_netif_down_api, esp_netif, NULL)
 
 bool esp_netif_is_netif_up(esp_netif_t *esp_netif)
 {
@@ -1370,26 +1349,7 @@ esp_err_t esp_netif_get_dns_info(esp_netif_t *esp_netif, esp_netif_dns_type_t ty
     return esp_netif_lwip_ipc_call(esp_netif_get_dns_info_api, esp_netif, (void *)&dns_param);
 }
 
-esp_ip6_addr_type_t esp_netif_ip6_get_addr_type(esp_ip6_addr_t* ip6_addr)
-{
-    ip6_addr_t* lwip_ip6_info = (ip6_addr_t*)ip6_addr;
-
-    if (ip6_addr_isglobal(lwip_ip6_info)) {
-        return ESP_IP6_ADDR_IS_GLOBAL;
-    } else if (ip6_addr_islinklocal(lwip_ip6_info)) {
-        return ESP_IP6_ADDR_IS_LINK_LOCAL;
-    } else if (ip6_addr_issitelocal(lwip_ip6_info)) {
-        return ESP_IP6_ADDR_IS_SITE_LOCAL;
-    } else if (ip6_addr_isuniquelocal(lwip_ip6_info)) {
-        return ESP_IP6_ADDR_IS_UNIQUE_LOCAL;
-    } else if (ip6_addr_isipv4mappedipv6(lwip_ip6_info)) {
-        return ESP_IP6_ADDR_IS_IPV4_MAPPED_IPV6;
-    }
-    return ESP_IP6_ADDR_IS_UNKNOWN;
-
-}
-
-static void esp_netif_nd6_cb(struct netif *p_netif, uint8_t ip_index)
+static void esp_netif_nd6_cb(struct netif *p_netif, uint8_t ip_idex)
 {
     ESP_LOGD(TAG, "%s lwip-netif:%p", __func__, p_netif);
     if (!p_netif) {
@@ -1400,9 +1360,9 @@ static void esp_netif_nd6_cb(struct netif *p_netif, uint8_t ip_index)
     esp_netif_ip6_info_t ip6_info;
     ip6_addr_t lwip_ip6_info;
     //notify event
-    ip_event_got_ip6_t evt = { .esp_netif = p_netif->state, .if_index = -1, .ip_index = ip_index };
+    ip_event_got_ip6_t evt = { .esp_netif = p_netif->state, .if_index = -1 };
 
-    ip6_addr_set(&lwip_ip6_info, ip_2_ip6(&p_netif->ip6_addr[ip_index]));
+    ip6_addr_set(&lwip_ip6_info, ip_2_ip6(&p_netif->ip6_addr[ip_idex]));
 #if LWIP_IPV6_SCOPES
     memcpy(&ip6_info.ip, &lwip_ip6_info, sizeof(esp_ip6_addr_t));
 #else

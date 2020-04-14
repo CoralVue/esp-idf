@@ -15,9 +15,9 @@
 #define _BLE_MESH_UTIL_H_
 
 #include <stddef.h>
-#include "soc/soc.h"
 #include "mesh_types.h"
 #include "mesh_trace.h"
+#include "soc/soc.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -400,17 +400,14 @@ int _compare(const uint8_t *a, const uint8_t *b, size_t size);
  */
 static inline void sys_memcpy_swap(void *dst, const void *src, size_t length)
 {
-    u8_t *pdst = (u8_t *)dst;
-    const u8_t *psrc = (const u8_t *)src;
+    __ASSERT(((src < dst && (src + length) <= dst) ||
+              (src > dst && (dst + length) <= src)),
+             "Source and destination buffers must not overlap");
 
-    __ASSERT(((psrc < pdst && (psrc + length) <= pdst) ||
-            (psrc > pdst && (pdst + length) <= psrc)),
-            "Source and destination buffers must not overlap");
-
-    psrc += length - 1;
+    src += length - 1;
 
     for (; length > 0; length--) {
-        *pdst++ = *psrc--;
+        *((u8_t *)dst++) = *((u8_t *)src--);
     }
 }
 

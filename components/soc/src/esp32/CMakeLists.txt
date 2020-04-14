@@ -1,5 +1,5 @@
-set(srcs "adc_hal.c"
-    "brownout_hal.c"
+set(srcs "brownout_hal.c"
+    "cpu_util.c"
     "rtc_clk.c"
     "rtc_clk_init.c"
     "rtc_init.c"
@@ -7,6 +7,7 @@ set(srcs "adc_hal.c"
     "rtc_sleep.c"
     "rtc_time.c"
     "rtc_wdt.c"
+    "sdio_slave_hal.c"
     "soc_memory_layout.c"
     "touch_sensor_hal.c")
 

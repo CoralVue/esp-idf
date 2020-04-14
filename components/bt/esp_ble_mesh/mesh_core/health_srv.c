@@ -9,13 +9,23 @@
 
 #include <string.h>
 #include <errno.h>
+#include <stdbool.h>
 
+#include "sdkconfig.h"
 #define BT_DBG_ENABLED IS_ENABLED(CONFIG_BLE_MESH_DEBUG_MODEL)
 
+#include "mesh_types.h"
+#include "mesh_util.h"
+#include "mesh_trace.h"
+#include "health_srv.h"
+
+#include "mesh.h"
+#include "adv.h"
+#include "net.h"
+#include "transport.h"
 #include "access.h"
 #include "foundation.h"
 #include "mesh_common.h"
-#include "health_srv.h"
 
 #include "btc_ble_mesh_health_model.h"
 
@@ -39,8 +49,8 @@ struct bt_mesh_health_srv *health_srv;
 static u8_t health_get_curr_fault_count(struct bt_mesh_model *model)
 {
     struct bt_mesh_health_srv *srv = model->user_data;
-    u8_t count = 0U;
-    size_t i = 0U;
+    u8_t count = 0;
+    size_t i;
 
     for (i = 0U; i < ARRAY_SIZE(srv->test.curr_faults); i++) {
         if (srv->test.curr_faults[i] != HEALTH_NO_FAULT) {
@@ -56,8 +66,8 @@ static void health_get_fault_value(struct bt_mesh_model *model,
                                    bool current)
 {
     struct bt_mesh_health_srv *srv = model->user_data;
-    size_t array_size = 0U;
-    size_t i = 0U;
+    size_t array_size;
+    size_t i;
 
     array_size = current ? ARRAY_SIZE(srv->test.curr_faults) : ARRAY_SIZE(srv->test.reg_faults);
 
@@ -76,9 +86,9 @@ static void health_get_fault_value(struct bt_mesh_model *model,
 static bool health_is_test_id_exist(struct bt_mesh_model *model, u8_t test_id)
 {
     struct bt_mesh_health_srv *srv = model->user_data;
-    int i;
+    u8_t i;
 
-    for (i = 0; i < srv->test.id_count; i++) {
+    for (i = 0U; i < srv->test.id_count; i++) {
         if (srv->test.test_ids[i] == test_id) {
             return true;
         }
@@ -92,7 +102,7 @@ static int health_send_fault_status(struct bt_mesh_model *model,
 {
     struct bt_mesh_health_srv *srv = model->user_data;
     struct net_buf_simple *msg = NULL;
-    int err = 0;
+    int err;
 
     msg = bt_mesh_alloc_buf(4 + ARRAY_SIZE(srv->test.reg_faults) + 4);
     if (!msg) {
@@ -125,7 +135,7 @@ static void health_fault_get(struct bt_mesh_model *model,
                              struct net_buf_simple *buf)
 {
     struct bt_mesh_health_srv *srv = model->user_data;
-    u16_t company_id = 0U;
+    u16_t company_id;
 
     if (!srv) {
         BT_ERR("%s, No Health Server context provided", __func__);
@@ -148,7 +158,7 @@ static void health_fault_clear(struct bt_mesh_model *model,
                                struct net_buf_simple *buf)
 {
     struct bt_mesh_health_srv *srv = model->user_data;
-    u16_t company_id = 0U;
+    u16_t company_id;
 
     if (!srv) {
         BT_ERR("%s, No Health Server context provided", __func__);
@@ -179,8 +189,8 @@ static void health_fault_test(struct bt_mesh_model *model,
                               struct net_buf_simple *buf)
 {
     struct bt_mesh_health_srv *srv = model->user_data;
-    u16_t company_id = 0U;
-    u8_t test_id = 0U;
+    u16_t company_id;
+    u8_t test_id;
 
     BT_DBG("%s", __func__);
 
@@ -219,7 +229,7 @@ static void send_attention_status(struct bt_mesh_model *model,
 {
     BLE_MESH_MODEL_BUF_DEFINE(msg, OP_ATTENTION_STATUS, 1);
     struct bt_mesh_health_srv *srv = model->user_data;
-    u8_t time = 0U;
+    u8_t time;
 
     if (!srv) {
         BT_ERR("%s, No Health Server context provided", __func__);
@@ -250,7 +260,7 @@ static void health_set_attention(struct bt_mesh_model *model,
                                  struct bt_mesh_msg_ctx *ctx,
                                  struct net_buf_simple *buf)
 {
-    u8_t time = 0U;
+    u8_t time;
 
     time = net_buf_simple_pull_u8(buf);
 
@@ -298,7 +308,7 @@ static void health_set_period(struct bt_mesh_model *model,
                               struct bt_mesh_msg_ctx *ctx,
                               struct net_buf_simple *buf)
 {
-    u8_t period = 0U;
+    u8_t period;
 
     period = net_buf_simple_pull_u8(buf);
     if (period > 15) {
@@ -365,7 +375,7 @@ static size_t health_get_current(struct bt_mesh_model *model,
 static int health_pub_update(struct bt_mesh_model *model)
 {
     struct bt_mesh_model_pub *pub = model->pub;
-    size_t count = 0U;
+    size_t count;
 
     BT_DBG("%s", __func__);
 
@@ -386,7 +396,7 @@ static int health_pub_update(struct bt_mesh_model *model)
 
 int bt_mesh_fault_update(struct bt_mesh_elem *elem)
 {
-    struct bt_mesh_model *model = NULL;
+    struct bt_mesh_model *model;
 
     model = bt_mesh_model_find(elem, BLE_MESH_MODEL_ID_HEALTH_SRV);
     if (!model) {
@@ -474,45 +484,9 @@ int bt_mesh_health_srv_init(struct bt_mesh_model *model, bool primary)
     return 0;
 }
 
-int bt_mesh_health_srv_deinit(struct bt_mesh_model *model, bool primary)
-{
-    struct bt_mesh_health_srv *srv = model->user_data;
-
-    if (!srv) {
-        if (!primary) {
-            /* If Health Server is in the secondary element with NULL user_data. */
-            return 0;
-        }
-
-        BT_ERR("%s, No Health Server context provided", __func__);
-        return -EINVAL;
-    }
-
-    if (srv->test.id_count == 0 || !srv->test.test_ids) {
-        BT_ERR("%s, No Health Test ID provided", __func__);
-        return -EINVAL;
-    }
-
-    if (!model->pub) {
-        BT_ERR("%s, Health Server has no publication support", __func__);
-        return -EINVAL;
-    }
-
-    model->pub->addr = BLE_MESH_ADDR_UNASSIGNED;
-    model->pub->update = NULL;
-
-    k_delayed_work_free(&srv->attn_timer);
-
-    if (primary) {
-        health_srv = NULL;
-    }
-
-    return 0;
-}
-
 void bt_mesh_attention(struct bt_mesh_model *model, u8_t time)
 {
-    struct bt_mesh_health_srv *srv = NULL;
+    struct bt_mesh_health_srv *srv;
 
     if (!model) {
         srv = health_srv;

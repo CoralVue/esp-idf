@@ -40,7 +40,7 @@ static void setup_triangle_sine_waves(int bits)
     triangle_float = -(pow(2, bits)/2 - 1);
 
     for(i = 0; i < SAMPLE_PER_CYCLE; i++) {
-        sin_float = sin(i * 2 * PI / SAMPLE_PER_CYCLE);
+        sin_float = sin(i * PI / 180.0);
         if(sin_float >= 0)
             triangle_float += triangle_step;
         else
@@ -77,7 +77,6 @@ static void setup_triangle_sine_waves(int bits)
 
     free(samples_data);
 }
-
 void app_main(void)
 {
     //for 36Khz sample rates, we create 100Hz sine wave, every cycle need 36000/100 = 360 samples (4-bytes or 8-bytes each sample)

@@ -19,7 +19,6 @@
 #include <stdbool.h>
 #include "esp_err.h"
 #include "esp_wifi_crypto_types.h"
-#include "esp_wifi_types.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -63,6 +62,7 @@ esp_err_t esp_supplicant_init(void);
   *          - others: failed
   */
 esp_err_t esp_supplicant_deinit(void);
+
 
 /**
   * @}

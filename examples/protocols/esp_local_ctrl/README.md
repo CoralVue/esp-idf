@@ -18,7 +18,7 @@ python scripts/esp_local_ctrl.py
 Sample output:
 
 ```
-python scripts/esp_local_ctrl.py
+python2 scripts/esp_local_ctrl.py
 
 ==== Acquiring properties information ====
 

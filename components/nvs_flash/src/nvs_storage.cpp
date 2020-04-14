@@ -763,9 +763,7 @@ inline bool isIterableItem(Item& item)
 
 inline bool isMultipageBlob(Item& item)
 {
-    return (item.datatype == ItemType::BLOB_DATA &&
-            !(item.chunkIndex == static_cast<uint8_t>(VerOffset::VER_0_OFFSET)
-                    || item.chunkIndex == static_cast<uint8_t>(VerOffset::VER_1_OFFSET)));
+    return (item.datatype == ItemType::BLOB_DATA && item.chunkIndex != 0);
 }
 
 bool Storage::nextEntry(nvs_opaque_iterator_t* it)

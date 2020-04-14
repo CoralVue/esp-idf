@@ -34,7 +34,7 @@
 #include "soc/rtc_cntl_reg.h"
 #include "soc/timer_group_reg.h"
 #include "soc/periph_defs.h"
-#include "hal/wdt_hal.h"
+#include "soc/rtc_wdt.h"
 #include "driver/rtc_io.h"
 
 #include "freertos/FreeRTOS.h"
@@ -68,9 +68,7 @@
 #include "esp_pm.h"
 #include "esp_private/pm_impl.h"
 #include "trax.h"
-#include "esp_ota_ops.h"
 #include "esp_efuse.h"
-#include "bootloader_mem.h"
 
 #define STRINGIFY(s) STRINGIFY2(s)
 #define STRINGIFY2(s) #s
@@ -112,20 +110,19 @@ void IRAM_ATTR call_start_cpu0(void)
 {
     RESET_REASON rst_reas;
 
-    bootloader_init_mem();
+    cpu_configure_region_protection();
 
-    // Move exception vectors to IRAM
-    cpu_hal_set_vecbase(&_init_start);
+    //Move exception vectors to IRAM
+    asm volatile (\
+                  "wsr    %0, vecbase\n" \
+                  ::"r"(&_init_start));
 
     rst_reas = rtc_get_reset_reason(0);
 
     // from panic handler we can be reset by RWDT or TG0WDT
     if (rst_reas == RTCWDT_SYS_RESET || rst_reas == TG0WDT_SYS_RESET) {
 #ifndef CONFIG_BOOTLOADER_WDT_ENABLE
-        wdt_hal_context_t rtc_wdt_ctx = {.inst = WDT_RWDT, .rwdt_dev = &RTCCNTL};
-        wdt_hal_write_protect_disable(&rtc_wdt_ctx);
-        wdt_hal_disable(&rtc_wdt_ctx);
-        wdt_hal_write_protect_enable(&rtc_wdt_ctx);
+        rtc_wdt_disable();
 #endif
     }
 
@@ -154,6 +151,7 @@ void IRAM_ATTR call_start_cpu0(void)
        1. make data buses works with SPIRAM
        2. make instruction and rodata work with SPIRAM, still through instruction cache */
 #if CONFIG_SPIRAM_BOOT_INIT
+    esp_spiram_init_cache();
     if (esp_spiram_init() != ESP_OK) {
 #if CONFIG_SPIRAM_IGNORE_NOTFOUND
         ESP_EARLY_LOGI(TAG, "Failed to init external RAM; continuing without it.");
@@ -163,30 +161,9 @@ void IRAM_ATTR call_start_cpu0(void)
         abort();
 #endif
     }
-    esp_spiram_init_cache();
 #endif
 
     ESP_EARLY_LOGI(TAG, "Pro cpu up.");
-    if (LOG_LOCAL_LEVEL >= ESP_LOG_INFO) {
-        const esp_app_desc_t *app_desc = esp_ota_get_app_description();
-        ESP_EARLY_LOGI(TAG, "Application information:");
-#ifndef CONFIG_APP_EXCLUDE_PROJECT_NAME_VAR
-        ESP_EARLY_LOGI(TAG, "Project name:     %s", app_desc->project_name);
-#endif
-#ifndef CONFIG_APP_EXCLUDE_PROJECT_VER_VAR
-        ESP_EARLY_LOGI(TAG, "App version:      %s", app_desc->version);
-#endif
-#ifdef CONFIG_BOOTLOADER_APP_SECURE_VERSION
-        ESP_EARLY_LOGI(TAG, "Secure version:   %d", app_desc->secure_version);
-#endif
-#ifdef CONFIG_APP_COMPILE_TIME_DATE
-        ESP_EARLY_LOGI(TAG, "Compile time:     %s %s", app_desc->date, app_desc->time);
-#endif
-        char buf[17];
-        esp_ota_get_app_elf_sha256(buf, sizeof(buf));
-        ESP_EARLY_LOGI(TAG, "ELF file SHA256:  %s...", buf);
-        ESP_EARLY_LOGI(TAG, "ESP-IDF:          %s", app_desc->idf_ver);
-    }
     ESP_EARLY_LOGI(TAG, "Single core mode");
 
 #if CONFIG_SPIRAM_MEMTEST
@@ -220,7 +197,14 @@ void IRAM_ATTR call_start_cpu0(void)
     esp_enable_cache_wrap(icache_wrap_enable, dcache_wrap_enable);
 #endif
 
-    /* Initialize heap allocator */
+    /* Initialize heap allocator. WARNING: This *needs* to happen *after* the app cpu has booted.
+       If the heap allocator is initialized first, it will put free memory linked list items into
+       memory also used by the ROM. Starting the app cpu will let its ROM initialize that memory,
+       corrupting those linked lists. Initializing the allocator *after* the app cpu has booted
+       works around this problem.
+       With SPI RAM enabled, there's a second reason: half of the SPI RAM will be managed by the
+       app CPU, and when that is not up yet, the memory will be inaccessible and heap_caps_init may
+       fail initializing it properly. */
     heap_caps_init();
 
     ESP_EARLY_LOGI(TAG, "Pro cpu start user code");
@@ -287,21 +271,18 @@ void start_cpu0_default(void)
     esp_efuse_disable_basic_rom_console();
 #endif
     rtc_gpio_force_hold_dis_all();
-
-#ifdef CONFIG_VFS_SUPPORT_IO
     esp_vfs_dev_uart_register();
-#endif // CONFIG_VFS_SUPPORT_IO
-
-#if defined(CONFIG_VFS_SUPPORT_IO) && !defined(CONFIG_ESP_CONSOLE_UART_NONE)
     esp_reent_init(_GLOBAL_REENT);
+#ifndef CONFIG_ESP_CONSOLE_UART_NONE
     const char *default_uart_dev = "/dev/uart/" STRINGIFY(CONFIG_ESP_CONSOLE_UART_NUM);
     _GLOBAL_REENT->_stdin  = fopen(default_uart_dev, "r");
     _GLOBAL_REENT->_stdout = fopen(default_uart_dev, "w");
     _GLOBAL_REENT->_stderr = fopen(default_uart_dev, "w");
-#else // defined(CONFIG_VFS_SUPPORT_IO) && !defined(CONFIG_ESP_CONSOLE_UART_NONE)
-    _REENT_SMALL_CHECK_INIT(_GLOBAL_REENT);
-#endif // defined(CONFIG_VFS_SUPPORT_IO) && !defined(CONFIG_ESP_CONSOLE_UART_NONE)
-
+#else
+    _GLOBAL_REENT->_stdin  = (FILE *) &__sf_fake_stdin;
+    _GLOBAL_REENT->_stdout = (FILE *) &__sf_fake_stdout;
+    _GLOBAL_REENT->_stderr = (FILE *) &__sf_fake_stderr;
+#endif
     esp_timer_init();
     esp_set_time_from_rtc();
 #if CONFIG_APPTRACE_ENABLE
@@ -336,10 +317,11 @@ void start_cpu0_default(void)
 #ifdef CONFIG_PM_ENABLE
     esp_pm_impl_init();
 #ifdef CONFIG_PM_DFS_INIT_AUTO
-    int xtal_freq = (int) rtc_clk_xtal_freq_get();
-    esp_pm_config_esp32s2_t cfg = {
-        .max_freq_mhz = CONFIG_ESP32S2_DEFAULT_CPU_FREQ_MHZ,
-        .min_freq_mhz = xtal_freq,
+    rtc_cpu_freq_t max_freq;
+    rtc_clk_cpu_freq_from_mhz(CONFIG_ESP32S2_DEFAULT_CPU_FREQ_MHZ, &max_freq);
+    esp_pm_config_esp32_t cfg = {
+        .max_cpu_freq = max_freq,
+        .min_cpu_freq = RTC_CPU_FREQ_XTAL
     };
     esp_pm_configure(&cfg);
 #endif //CONFIG_PM_DFS_INIT_AUTO
@@ -400,10 +382,7 @@ static void main_task(void *args)
 
     // Now that the application is about to start, disable boot watchdog
 #ifndef CONFIG_BOOTLOADER_WDT_DISABLE_IN_USER_CODE
-    wdt_hal_context_t rtc_wdt_ctx = {.inst = WDT_RWDT, .rwdt_dev = &RTCCNTL};
-    wdt_hal_write_protect_disable(&rtc_wdt_ctx);
-    wdt_hal_disable(&rtc_wdt_ctx);
-    wdt_hal_write_protect_enable(&rtc_wdt_ctx);
+    rtc_wdt_disable();
 #endif
 
 #ifdef CONFIG_BOOTLOADER_EFUSE_SECURE_VERSION_EMULATE

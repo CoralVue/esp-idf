@@ -459,8 +459,7 @@ class Monitor(object):
 
     Main difference is that all event processing happens in the main thread, not the worker threads.
     """
-    def __init__(self, serial_instance, elf_file, print_filter, make="make", encrypted=False,
-                 toolchain_prefix=DEFAULT_TOOLCHAIN_PREFIX, eol="CRLF",
+    def __init__(self, serial_instance, elf_file, print_filter, make="make", toolchain_prefix=DEFAULT_TOOLCHAIN_PREFIX, eol="CRLF",
                  decode_coredumps=COREDUMP_DECODE_INFO):
         super(Monitor, self).__init__()
         self.event_queue = queue.Queue()
@@ -491,7 +490,6 @@ class Monitor(object):
             self.make = shlex.split(make)  # allow for possibility the "make" arg is a list of arguments (for idf.py)
         else:
             self.make = make
-        self.encrypted = encrypted
         self.toolchain_prefix = toolchain_prefix
 
         # internal state
@@ -649,7 +647,7 @@ class Monitor(object):
             else:
                 popen_args = [self.make, target]
             yellow_print("Running %s..." % " ".join(popen_args))
-            p = subprocess.Popen(popen_args, env=os.environ)
+            p = subprocess.Popen(popen_args)
             try:
                 p.wait()
             except KeyboardInterrupt:
@@ -850,9 +848,9 @@ class Monitor(object):
             self.serial.setDTR(self.serial.dtr)  # usbser.sys workaround
             self.output_enable(True)
         elif cmd == CMD_MAKE:
-            self.run_make("encrypted-flash" if self.encrypted else "flash")
+            self.run_make("flash")
         elif cmd == CMD_APP_FLASH:
-            self.run_make("encrypted-app-flash" if self.encrypted else "app-flash")
+            self.run_make("app-flash")
         elif cmd == CMD_OUTPUT_TOGGLE:
             self.output_toggle()
         elif cmd == CMD_TOGGLE_LOGGING:
@@ -904,11 +902,6 @@ def main():
         type=str, default='make')
 
     parser.add_argument(
-        '--encrypted',
-        help='Use encrypted targets while running make',
-        action='store_true')
-
-    parser.add_argument(
         '--toolchain-prefix',
         help="Triplet prefix to add before cross-toolchain names",
         default=DEFAULT_TOOLCHAIN_PREFIX)
@@ -938,13 +931,7 @@ def main():
 
     args = parser.parse_args()
 
-    # GDB uses CreateFile to open COM port, which requires the COM name to be r'\\.\COMx' if the COM
-    # number is larger than 10
-    if os.name == 'nt' and args.port.startswith("COM"):
-        args.port = args.port.replace('COM', r'\\.\COM')
-        yellow_print("--- WARNING: GDB cannot open serial ports accessed as COMx")
-        yellow_print("--- Using %s instead..." % args.port)
-    elif args.port.startswith("/dev/tty."):
+    if args.port.startswith("/dev/tty."):
         args.port = args.port.replace("/dev/tty.", "/dev/cu.")
         yellow_print("--- WARNING: Serial ports accessed as /dev/tty.* will hang gdb if launched.")
         yellow_print("--- Using %s instead..." % args.port)
@@ -967,15 +954,7 @@ def main():
     except KeyError:
         pass  # not running a make jobserver
 
-    # Pass the actual used port to callee of idf_monitor (e.g. make) through `ESPPORT` environment
-    # variable
-    # To make sure the key as well as the value are str type, by the requirements of subprocess
-    espport_key = str("ESPPORT")
-    espport_val = str(args.port)
-    os.environ.update({espport_key: espport_val})
-
-    monitor = Monitor(serial_instance, args.elf_file.name, args.print_filter, args.make, args.encrypted,
-                      args.toolchain_prefix, args.eol,
+    monitor = Monitor(serial_instance, args.elf_file.name, args.print_filter, args.make, args.toolchain_prefix, args.eol,
                       args.decode_coredumps)
 
     yellow_print('--- idf_monitor on {p.name} {p.baudrate} ---'.format(
