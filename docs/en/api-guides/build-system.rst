@@ -178,14 +178,15 @@ For more detailed information about integrating ESP-IDF with CMake into an IDE, 
 
 .. _setting-python-interpreter:
 
-Setting the Python Interpreter
-------------------------------
+Setting up the Python Interpreter
+---------------------------------
 
-Currently, ESP-IDF only works with Python 2.7. If you have a system where the default ``python`` interpreter is Python 3.x, this can lead to problems.
+ESP-IDF works well with all supported Python versions. It should work out-of-box even if you have a legacy system where the default ``python`` interpreter is still Python 2.7, however, it is advised to switch to Python 3 if possible.
 
-If using ``idf.py``, running ``idf.py`` as ``python2 $IDF_PATH/tools/idf.py ...`` will work around this issue (``idf.py`` will tell other Python processes to use the same Python interpreter). You can set up a shell alias or another script to simplify the command.
+``idf.py`` and other Python scripts will run with the default Python interpreter, i.e. ``python``. You can switch to a
+different one like ``python3 $IDF_PATH/tools/idf.py ...``, or you can set up a shell alias or another script to simplify the command.
 
-If using CMake directly, running ``cmake -D PYTHON=python2 ...`` will cause CMake to override the default Python interpreter.
+If using CMake directly, running ``cmake -D PYTHON=python3 ...`` will cause CMake to override the default Python interpreter.
 
 If using an IDE with CMake, setting the ``PYTHON`` value as a CMake cache override in the IDE UI will override the default Python interpreter.
 
@@ -959,7 +960,7 @@ Selecting the Target
 
 ESP-IDF supports multiple targets (chips). The identifiers used for each chip are as follows:
 
-* ``esp32`` — for ESP32-D0WD, ESP32-D2WD, ESP32-S0WD (ESP-SOLO), ESP32-U4WD, ESP32-PICO-D4
+* ``esp32`` — for ESP32-D0WD, ESP32-D2WD, ESP32-S0WD (ESP-SOLO), ESP32-U4WDH, ESP32-PICO-D4
 * ``esp32s2``— for ESP32-S2
 
 To select the target before building the project, use ``idf.py set-target <target>`` command, for example::
@@ -1216,6 +1217,7 @@ For example, to get the Python interpreter used for the build:
   - CXX_COMPILE_OPTIONS - compile options applied to all components' C++ source files
   - EXECUTABLE - project executable; set by call to ``idf_build_executable``
   - EXECUTABLE_NAME - name of project executable without extension; set by call to ``idf_build_executable``
+  - EXECUTABLE_DIR - path containing the output executable
   - IDF_PATH - ESP-IDF path; set from IDF_PATH environment variable, if not, inferred from the location of ``idf.cmake``
   - IDF_TARGET - target chip for the build; set from the required target argument for ``idf_build_process``
   - IDF_VER - ESP-IDF version; set from either a version file or the Git revision of the IDF_PATH repository
@@ -1381,47 +1383,7 @@ A tool called ``confserver.py`` is provided to allow IDEs to easily integrate wi
 
 You can run ``confserver.py`` from a project via ``idf.py confserver`` or ``ninja confserver``, or a similar target triggered from a different build generator.
 
-The config server outputs human-readable errors and warnings on stderr and JSON on stdout. On startup, it will output the full values of each configuration item in the system as a JSON dictionary, and the available ranges for values which are range constrained. The same information is contained in ``sdkconfig.json``::
-
-  {"version": 1, "values": { "ITEM": "value", "ITEM_2": 1024, "ITEM_3": false }, "ranges" : { "ITEM_2" : [ 0, 32768 ] } }
-
-Only visible configuration items are sent. Invisible/disabled items can be parsed from the static ``kconfig_menus.json`` file which also contains the menu structure and other metadata (descriptions, types, ranges, etc.)
-
-The Configuration Server will then wait for input from the client. The client passes a request to change one or more values, as a JSON object followed by a newline::
-
-   {"version": "1", "set": {"SOME_NAME": false, "OTHER_NAME": true } }
-
-The Configuration Server will parse this request, update the project ``sdkconfig`` file, and return a full list of changes::
-
-   {"version": 1, "values": {"SOME_NAME": false, "OTHER_NAME": true , "DEPENDS_ON_SOME_NAME": null}}
-
-Items which are now invisible/disabled will return value ``null``. Any item which is newly visible will return its newly visible current value.
-
-If the range of a config item changes, due to conditional range depending on another value, then this is also sent::
-
-   {"version": 1, "values": {"OTHER_NAME": true }, "ranges" : { "HAS_RANGE" : [ 3, 4 ] } }
-
-If invalid data is passed, an "error" field is present on the object::
-
-    {"version": 1, "values": {}, "error": ["The following config symbol(s) were not visible so were not updated: NOT_VISIBLE_ITEM"]}
-
-By default, no config changes are written to the sdkconfig file. Changes are held in memory until a "save" command is sent::
-
-    {"version": 1, "save": null }
-
-To reload the config values from a saved file, discarding any changes in memory, a "load" command can be sent::
-
-    {"version": 1, "load": null }
-
-The value for both "load" and "save" can be a new pathname, or "null" to load/save the previous pathname.
-
-The response to a "load" command is always the full set of config values and ranges, the same as when the server is initially started.
-
-Any combination of "load", "set", and "save" can be sent in a single command and commands are executed in that order. Therefore it's possible to load config from a file, set some config item values and then save to a file in a single command.
-
-.. note:: The configuration server does not automatically load any changes which are applied externally to the ``sdkconfig`` file. Send a "load" command or restart the server if the file is externally edited.
-
-.. note:: The configuration server does not re-run CMake to regenerate other build files or metadata files after ``sdkconfig`` is updated. This will happen automatically the next time ``CMake`` or ``idf.py`` is run.
+For more information about ``confserver.py``, see :idf_file:`tools/kconfig_new/README.md`.
 
 Build System Internals
 =======================
@@ -1527,6 +1489,8 @@ The tool will convert the project Makefile and any component ``component.mk`` fi
 
 It does so by running ``make`` to expand the ESP-IDF build system variables which are set by the build, and then producing equivalent CMakelists files to set the same variables.
 
+.. important:: When the conversion tool converts a ``component.mk`` file, it doesn't determine what other components that component depends on. This information needs to be added manually by editing the new component ``CMakeLists.txt`` file and adding ``REQUIRES`` and/or ``PRIV_REQUIRES`` clauses. Otherwise, source files in the component will fail to compile as headers from other components are not found. See :ref:`component requirements`.
+
 The conversion tool is not capable of dealing with complex Makefile logic or unusual targets. These will need to be converted by hand.
 
 No Longer Available in CMake
@@ -1580,7 +1544,7 @@ Flashing from make
 .. _cmake project: https://cmake.org/cmake/help/v3.5/command/project.html
 .. _cmake set: https://cmake.org/cmake/help/v3.5/command/set.html
 .. _cmake string: https://cmake.org/cmake/help/v3.5/command/string.html
-.. _cmake faq generated files: https://cmake.org/Wiki/CMake_FAQ#How_can_I_generate_a_source_file_during_the_build.3F
+.. _cmake faq generated files: https://gitlab.kitware.com/cmake/community/-/wikis/FAQ#how-can-i-generate-a-source-file-during-the-build
 .. _ADDITIONAL_MAKE_CLEAN_FILES: https://cmake.org/cmake/help/v3.5/prop_dir/ADDITIONAL_MAKE_CLEAN_FILES.html
 .. _ExternalProject: https://cmake.org/cmake/help/v3.5/module/ExternalProject.html
 .. _cmake language variables: https://cmake.org/cmake/help/v3.5/manual/cmake-variables.7.html#variables-for-languages
@@ -1589,6 +1553,6 @@ Flashing from make
 .. _target_link_libraries: https://cmake.org/cmake/help/v3.5/command/target_link_libraries.html#command:target_link_libraries
 .. _cmake_toolchain_file: https://cmake.org/cmake/help/v3.5/variable/CMAKE_TOOLCHAIN_FILE.html
 .. _quirc: https://github.com/dlbeer/quirc
-.. _pyenv: https://github.com/pyenv/pyenv#README
+.. _pyenv: https://github.com/pyenv/pyenv#readme
 .. _virtualenv: https://virtualenv.pypa.io/en/stable/
 .. _CCache: https://ccache.dev/
