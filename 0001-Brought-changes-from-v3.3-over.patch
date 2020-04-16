@@ -1,0 +1,61 @@
+From d2662f0c4b0b0ff39970cd518f948fe2ccb55831 Mon Sep 17 00:00:00 2001
+From: Don Edvalson <don@coralvue.com>
+Date: Wed, 19 Feb 2020 11:42:47 -0500
+Subject: [PATCH 1/2] Brought changes from v3.3 over
+
+---
+ components/bt/host/bluedroid/api/include/api/esp_blufi_api.h | 1 +
+ .../bt/host/bluedroid/btc/profile/esp/blufi/blufi_prf.c      | 5 +++--
+ components/driver/pcnt.c                                     | 3 ++-
+ 3 files changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/components/bt/host/bluedroid/api/include/api/esp_blufi_api.h b/components/bt/host/bluedroid/api/include/api/esp_blufi_api.h
+index 690518748..32738576d 100644
+--- a/components/bt/host/bluedroid/api/include/api/esp_blufi_api.h
++++ b/components/bt/host/bluedroid/api/include/api/esp_blufi_api.h
+@@ -112,6 +112,7 @@ typedef struct {
+ typedef struct {
+     uint8_t ssid[33];                     /**< SSID of AP */
+     int8_t  rssi;                         /**< signal strength of AP */
++    int8_t channel;                       // ADDED BY DON EDVALSON FOR HYDROS
+ } esp_blufi_ap_record_t;
+ 
+ /**
+diff --git a/components/bt/host/bluedroid/btc/profile/esp/blufi/blufi_prf.c b/components/bt/host/bluedroid/btc/profile/esp/blufi/blufi_prf.c
+index 249bafa56..4b7af71ad 100644
+--- a/components/bt/host/bluedroid/btc/profile/esp/blufi/blufi_prf.c
++++ b/components/bt/host/bluedroid/btc/profile/esp/blufi/blufi_prf.c
+@@ -624,13 +624,14 @@ void btc_blufi_send_wifi_list(uint16_t apCount, esp_blufi_ap_record_t *list)
+         uint len = strlen((const char *)list[i].ssid);
+         data_len = (p - data);
+         //current_len + ssid + rssi + total_len_value
+-        if((data_len + len + 1 + 1) >  malloc_size) {
++        if ((data_len + len + 1 + 1 + 1) > malloc_size) { // DON EDVALSON add an extra 1 for channel
+             BTC_TRACE_ERROR("%s len error", __func__);
+             osi_free(data);
+             return;
+         }
+-        *p++ = len + 1; // length of ssid + rssi
++        *p++ = len + 2; // length of ssid + rssi // DON EDVALSON make this +2 for channel
+         *p++ = list[i].rssi;
++        *p++ = list[i].channel; // DON EDVALSON add channel
+         memcpy(p, list[i].ssid, len);
+         p = p + len;
+     }
+diff --git a/components/driver/pcnt.c b/components/driver/pcnt.c
+index 32ceb2348..d31b793c4 100644
+--- a/components/driver/pcnt.c
++++ b/components/driver/pcnt.c
+@@ -118,7 +118,8 @@ esp_err_t pcnt_set_pin(pcnt_unit_t unit, pcnt_channel_t channel, int pulse_io, i
+ 
+     if(pulse_io >= 0) {
+         PIN_FUNC_SELECT(GPIO_PIN_MUX_REG[pulse_io], PIN_FUNC_GPIO);
+-        gpio_set_direction(pulse_io, GPIO_MODE_INPUT);
++        PIN_INPUT_ENABLE(GPIO_PIN_MUX_REG[pulse_io]); // ADDED BY DON EDVALSON
++//        gpio_set_direction(pulse_io, GPIO_MODE_INPUT); // COMMENT BY DON EDVALSON
+         gpio_set_pull_mode(pulse_io, GPIO_PULLUP_ONLY);
+         gpio_matrix_in(pulse_io, input_sig_index, 0);
+     }
+-- 
+2.20.1.windows.1
+
