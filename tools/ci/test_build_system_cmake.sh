@@ -48,7 +48,7 @@ function run_tests()
     if [ -z $CHECKOUT_REF_SCRIPT ]; then
         git checkout ${CI_BUILD_REF_NAME} || echo "Using esp-idf-template default branch..."
     else
-        $CHECKOUT_REF_SCRIPT esp-idf-template
+        $CHECKOUT_REF_SCRIPT esp-idf-template .
     fi
 
     print_status "Try to clean fresh directory..."
@@ -393,6 +393,10 @@ function run_tests()
     (cd build && cmake $IDF_PATH/examples/build_system/cmake/idf_as_lib -DCMAKE_TOOLCHAIN_FILE=$IDF_PATH/tools/cmake/toolchain-esp32.cmake -DTARGET=esp32)
     grep -q '"command"' build/compile_commands.json || failure "compile_commands.json missing or has no no 'commands' in it"
     (grep '"command"' build/compile_commands.json | grep -v mfix-esp32-psram-cache-issue) && failure "All commands in compile_commands.json should use PSRAM cache workaround"
+    rm -r build
+
+    print_status "Displays partition table when executing target partition_table"
+    idf.py partition_table | grep -E "# Espressif .+ Partition Table"
     rm -r build
 
     print_status "Make sure a full build never runs '/usr/bin/env python' or similar"
