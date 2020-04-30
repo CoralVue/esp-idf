@@ -387,8 +387,9 @@ esp_err_t sdspi_host_init_slot(int slot, const sdspi_slot_config_t* slot_config)
     } else {
         s_slots[slot].gpio_int = GPIO_UNUSED;
     }
-
-    s_slots[slot].transactions = calloc(SDSPI_TRANSACTION_COUNT, sizeof(spi_transaction_t));
+    // DON EDVALSON
+    // CHANGED THE FOLLOWING LINE FROM CALLOC TO GET THIS INTO DMA SO THAT IT WON'T HAVE TO BE COPIED ALL THE TIME
+    s_slots[slot].transactions = heap_caps_calloc(SDSPI_TRANSACTION_COUNT, sizeof(spi_transaction_t), MALLOC_CAP_DMA | MALLOC_CAP_32BIT);
     if (s_slots[slot].transactions == NULL) {
         ret = ESP_ERR_NO_MEM;
         goto cleanup;
